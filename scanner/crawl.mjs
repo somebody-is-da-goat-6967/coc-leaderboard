@@ -244,6 +244,7 @@ if (playerSeeds.length) {
   await pool(playerSeeds, CONCURRENCY, async t => { await fetchPlayer(t); store.meta.checkedSeeds[t] = 1; });
 }
 
+
 // clan seeds
 for (const t of await readJson('scanner/seeds.json', [])) queueCandidate(t);
 
