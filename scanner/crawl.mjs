@@ -29,6 +29,8 @@ const NAME_QUERIES_PER_CHUNK = 50;
 const DICT_RERUN_MS = 7 * DAY_MS;
 const DISCOVERY_EVERY_MS = DAY_MS;
 const HISTORY_MAX = 730;
+// how many daily end-of-day boards to keep (each is ~150-250 KB gzipped). 0 = keep everything.
+const EOD_KEEP_DAYS = process.env.EOD_KEEP_DAYS !== undefined ? +process.env.EOD_KEEP_DAYS : 90;
 
 const started = Date.now();
 const softDeadline = started + SOFT_MS;
@@ -156,8 +158,11 @@ async function fetchPlayer(tag) {
   }
 }
 
-const sortedPlayers = () => Object.entries(store.players)
-  .map(([tag, p]) => ({ tag, ...p })).sort((a, b) => b.trophies - a.trophies);
+const sortedPlayers = () => {
+  const list = Object.entries(store.players).map(([tag, p]) => ({ tag, ...p })).sort((a, b) => b.trophies - a.trophies);
+  list.forEach((p, i) => { p.rank = i > 0 && p.trophies === list[i - 1].trophies ? list[i - 1].rank : i + 1; });
+  return list;
+};
 
 // ---------- steps ----------
 function endOfDayIfDue() {
@@ -279,15 +284,17 @@ const players = sortedPlayers();
 const nClans = Object.keys(store.clans).length;
 
 const write = (f, data) => fs.writeFile(path.join(OUT_DIR, f), typeof data === 'string' ? data : JSON.stringify(data));
+const eodDir = path.join(OUT_DIR, 'eod');
+await fs.mkdir(eodDir, { recursive: true });
 if (eod) {
-  try {
-    const prev = JSON.parse(await fs.readFile(path.join(OUT_DIR, 'endOfDay.json'), 'utf8'));
-    if (prev.date !== eod.date) await write('endOfDay.prev.json', prev);
-  } catch {}
-  await write('endOfDay.json', eod);
-  console.log(`end-of-day snapshot recorded for ${eod.date} (${eod.players.length} players)`);
+  await fs.writeFile(path.join(eodDir, `${eod.date}.json.gz`), await gzip(JSON.stringify(eod)));
+  console.log(`end-of-day snapshot archived for ${eod.date} (${eod.players.length} players)`);
 }
-const readDate = async f => { try { return JSON.parse(await fs.readFile(path.join(OUT_DIR, f), 'utf8')).date || null; } catch { return null; } };
+let eodDates = (await fs.readdir(eodDir)).filter(f => /^\d{4}-\d{2}-\d{2}\.json\.gz$/.test(f)).map(f => f.slice(0, 10)).sort();
+if (EOD_KEEP_DAYS > 0 && eodDates.length > EOD_KEEP_DAYS) {
+  for (const d of eodDates.slice(0, -EOD_KEEP_DAYS)) await fs.unlink(path.join(eodDir, `${d}.json.gz`));
+  eodDates = eodDates.slice(-EOD_KEEP_DAYS);
+}
 
 await write('leaderboard.json', { generatedAt: Date.now(), players });
 await write('meta.json', {
@@ -298,8 +305,9 @@ await write('meta.json', {
   nameSearchDictionary: prog, dictionarySize: words.length,
   countHistory: store.meta.legendCountHistory,
   lastDiscoveryAt: store.meta.lastDiscoveryAt || null,
-  endOfDayDate: await readDate('endOfDay.json'),
-  endOfDayPrevDate: await readDate('endOfDay.prev.json'),
+  endOfDayDates: eodDates,
+  endOfDayDate: eodDates.at(-1) || null,
+  endOfDayPrevDate: eodDates.at(-2) || null,
 });
 await fs.writeFile(path.join(OUT_DIR, 'state.json.gz'), await gzip(JSON.stringify(store)));
 console.log(`done in ${Math.round((Date.now() - started) / 1000)}s: ${players.length} Legend I players, ${nClans} clans, ${store.queue.length} queued, dictionary ${prog.index}/${prog.total}`);
