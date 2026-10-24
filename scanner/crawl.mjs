@@ -286,6 +286,17 @@ const nClans = Object.keys(store.clans).length;
 const write = (f, data) => fs.writeFile(path.join(OUT_DIR, f), typeof data === 'string' ? data : JSON.stringify(data));
 const eodDir = path.join(OUT_DIR, 'eod');
 await fs.mkdir(eodDir, { recursive: true });
+// one-time import of the snapshots your old scanner saved (upload them to scanner/ in the repo)
+for (const f of ['scanner/endOfDaySnapshot.json', 'scanner/endOfDaySnapshot.prev.json']) {
+  const snap = await readJson(f, null);
+  if (!snap || !snap.date || !Array.isArray(snap.players)) continue;
+  const out = path.join(eodDir, `${snap.date}.json.gz`);
+  try { await fs.access(out); continue; } catch {} // already archived
+  snap.players.sort((a, b) => b.trophies - a.trophies)
+    .forEach((p, i, a) => { p.rank = i > 0 && p.trophies === a[i - 1].trophies ? a[i - 1].rank : i + 1; });
+  await fs.writeFile(out, await gzip(JSON.stringify(snap)));
+  console.log(`imported ${f} as ${snap.date} (${snap.players.length} players)`);
+}
 if (eod) {
   await fs.writeFile(path.join(eodDir, `${eod.date}.json.gz`), await gzip(JSON.stringify(eod)));
   console.log(`end-of-day snapshot archived for ${eod.date} (${eod.players.length} players)`);
