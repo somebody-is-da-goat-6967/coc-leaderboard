@@ -28,7 +28,7 @@ jobs:
       - name: Crawl
         env:
           COC_API_KEY: ${{ secrets.COC_API_KEY }}
-          MODE: ${{ inputs.mode || 'auto' }}
+          MODE: refresh
         run: node scanner/crawl.mjs
       - name: Publish (single-commit branch so history never grows)
         working-directory: data-out
