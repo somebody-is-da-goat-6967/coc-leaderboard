@@ -3,7 +3,7 @@
 //
 //   data branch      : live.json.gz, state.json.gz, index.json, the last few daily files (see BATTLELOG_KEEP_DAYS)
 //   archive-sYYYY-MM-DD : days/YYYY-MM-DD.json.gz for every finished day of the season that started on that date
-//                         + index.json listing them. Only the 2 newest seasons are kept (current + previous).
+//                         + index.json listing them + season.json.gz (all days folded together, see seasonAgg.mjs). Only the 2 newest seasons are kept (current + previous).
 //
 // Runs after scanner/battlelogs.mjs. Cheap on almost every run: it only touches git when a day became
 // final and has not been archived yet (tracked in data-out/battlelogs/archived.json).
@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { emptySeason, foldDay, readGz, writeGz, loadEodRanks } from './seasonAgg.mjs';
 
 const OUT_DIR = process.env.OUT_DIR || 'data-out';
 const BL_DIR = path.join(OUT_DIR, 'battlelogs');
@@ -77,6 +78,17 @@ for (const [idx, dates] of groups) {
     for (const d of dates) fs.copyFileSync(path.join(BL_DIR, `${d}.json.gz`), path.join(tmp, 'days', `${d}.json.gz`));
 
     const all = fs.readdirSync(path.join(tmp, 'days')).filter(f => f.endsWith('.json.gz')).map(f => f.slice(0, 10)).sort();
+    // Fold every day in the branch into ONE compact season.json.gz (the stats page reads only this file).
+    // Idempotent: days already in agg.days are skipped, so this also backfills days archived before this existed.
+    const sf = path.join(tmp, 'season.json.gz');
+    const agg = readGz(sf, null) || emptySeason(key, ANCHOR + idx * SEASON_MS, SEASON_MS / DAY_MS);
+    for (const d of all) {
+      if (agg.days.includes(d)) continue;
+      const day = readGz(path.join(tmp, 'days', `${d}.json.gz`), null);
+      if (day) foldDay(agg, d, day, loadEodRanks(path.join(OUT_DIR, 'eod', `${d}.json.gz`)));
+    }
+    writeGz(sf, agg);
+
     fs.writeFileSync(path.join(tmp, 'index.json'), JSON.stringify({
       season: key,
       seasonStart: new Date(ANCHOR + idx * SEASON_MS).toISOString(),
