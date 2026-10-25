@@ -16,7 +16,7 @@ permissions:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,6 +30,12 @@ jobs:
           COC_API_KEY: ${{ secrets.COC_API_KEY }}
           MODE: refresh
         run: node scanner/crawl.mjs
+      - name: Battlelogs (live + daily 05:00 UTC copy)
+        continue-on-error: true   # never block publishing the leaderboard
+        timeout-minutes: 25
+        env:
+          COC_API_KEY: ${{ secrets.COC_API_KEY }}
+        run: node scanner/battlelogs.mjs
       - name: Publish (single-commit branch so history never grows)
         working-directory: data-out
         run: |
