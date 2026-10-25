@@ -35,7 +35,12 @@ jobs:
         timeout-minutes: 25
         env:
           COC_API_KEY: ${{ secrets.COC_API_KEY }}
+          BATTLELOG_KEEP_DAYS: 3  # only a few finished days stay on the data branch; the rest live in archive-s* branches
         run: node scanner/battlelogs.mjs
+      - name: Archive finished days (one branch per season, keeps current + previous)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: node scanner/archive.mjs
       - name: Publish (single-commit branch so history never grows)
         working-directory: data-out
         run: |
