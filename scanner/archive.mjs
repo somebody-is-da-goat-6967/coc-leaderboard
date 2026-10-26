@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { emptySeason, foldDay, readGz, writeGz, loadEodRanks } from './seasonAgg.mjs';
+import { emptySeason, foldDay, readGz, writeGz, loadEodRanks } from './Seasonagg.mjs';
 
 const OUT_DIR = process.env.OUT_DIR || 'data-out';
 const BL_DIR = path.join(OUT_DIR, 'battlelogs');
