@@ -23,6 +23,9 @@ const SOFT_MS = (+process.env.BUDGET_MIN || 22) * 60_000;   // stop starting opt
 const HARD_MS = (+process.env.HARD_MIN || 27) * 60_000;     // stop everything, save, publish
 
 const LEGEND_I_ID = 105000036;
+// A player only counts as Legend I while they are in the Legend I tier AND have at least this many
+// trophies. Dropping below it means they fell out of Legend I and get removed on the next scan.
+const LEGEND_MIN_TROPHIES = +process.env.LEGEND_MIN_TROPHIES || 2000;
 const DAY_MS = 86_400_000;
 const DAILY_RESET_UTC_HOUR = 5;
 const NAME_QUERIES_PER_CHUNK = 50;
@@ -103,8 +106,10 @@ store.meta.legendCountHistory ||= [];
 store.meta.checkedSeeds ||= {};
 delete store.meta.endOfDaySnapshot; // legacy field from the old on-disk store
 
-// drop anything the old scanner left behind that is not useful
-for (const [t, p] of Object.entries(store.players)) if (p.leagueId !== LEGEND_I_ID) delete store.players[t];
+// drop anything the old scanner left behind that is not useful (wrong tier, or fell under the trophy floor)
+for (const [t, p] of Object.entries(store.players)) {
+  if (p.leagueId !== LEGEND_I_ID || (p.trophies || 0) < LEGEND_MIN_TROPHIES) delete store.players[t];
+}
 for (const [t, c] of Object.entries(store.clans)) if (!c.lastScanned) delete store.clans[t];
 
 // ---------- queue (cursor-based so big backlogs stay fast) ----------
@@ -125,7 +130,12 @@ function savePlayer(p, clanTagFallback) {
   if (!p || !p.tag) return false;
   const tier = p.leagueTier || p.league || {};
   const clan = p.clan || {};
-  if (tier.id !== LEGEND_I_ID) { delete store.players[p.tag]; return false; }
+  // Not in Legend I (wrong tier, or under the trophy floor) -> make sure they are NOT on the board.
+  // Newly qualifying players fall through and get added; this runs for every member of every scanned clan.
+  if (tier.id !== LEGEND_I_ID || (p.trophies || 0) < LEGEND_MIN_TROPHIES) {
+    delete store.players[p.tag];
+    return false;
+  }
   store.players[p.tag] = {
     name: p.name,
     trophies: p.trophies || 0,
