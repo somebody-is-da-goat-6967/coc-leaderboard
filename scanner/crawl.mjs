@@ -241,6 +241,95 @@ async function dictionaryChunk(words, prog) {
   if (prog.index >= words.length) { prog.complete = true; prog.completedAt = Date.now(); }
 }
 
+// ---------- battle-log discovery ----------
+// A known Legend player's battle log lists everyone they attacked or were attacked by. Any opponent we have
+// not indexed is looked up; if they turn out to be Legend I they join the board and their own log is read
+// next (breadth-first), so one known player can pull in a whole chain of unknown ones.
+// Time-boxed per run; known players are read oldest-scan-first so every log gets its turn across runs.
+//   BATTLE_DISCOVERY=0        turn it off
+//   BATTLE_BUDGET_SEC=150     max seconds per run spent on it
+//   BATTLE_SKIP_TYPES=homeVillage   comma list of battleType values to ignore (random home-village opponents)
+const BATTLE_DISCOVERY = process.env.BATTLE_DISCOVERY !== '0';
+const BATTLE_BUDGET_MS = (+process.env.BATTLE_BUDGET_SEC || 150) * 1000;
+const BATTLE_SKIP_TYPES = new Set((process.env.BATTLE_SKIP_TYPES ?? 'homeVillage')
+  .split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+const MISS_TTL_MS = 7 * DAY_MS; // an opponent who is not Legend I is not looked up again for a week
+const MISS_MAX = 100_000;
+
+async function battleDiscovery() {
+  if (!BATTLE_DISCOVERY) return;
+  const t0 = Date.now();
+  const n = new Date(t0);
+  let nextReset = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), DAILY_RESET_UTC_HOUR);
+  if (nextReset <= t0) nextReset += DAY_MS;
+  // never run in the 10 min before the daily reset, so the end-of-day board stays clean
+  const deadline = Math.min(t0 + BATTLE_BUDGET_MS, nextReset - 10 * 60_000, softDeadline);
+  if (deadline <= t0) { console.log('battle discovery: skipped (too close to the daily reset)'); return; }
+
+  const scanned = store.meta.battleScanned ||= {};   // tag -> when its battle log was last read
+  const misses = store.meta.opponentMisses ||= {};   // tag -> when we last found they are not Legend I
+  for (const [t, ts] of Object.entries(misses)) if (t0 - ts > MISS_TTL_MS) delete misses[t];
+
+  const frontier = Object.keys(store.players).sort((a, b) =>
+    (scanned[a] || 0) - (scanned[b] || 0) || (store.players[b].trophies || 0) - (store.players[a].trophies || 0));
+  let fi = 0;
+  const fresh = []; // players just added this run: their logs are read before the rest of the frontier
+  const nextTag = () => fresh.length ? fresh.shift() : (fi < frontier.length ? frontier[fi++] : null);
+
+  const seen = new Set();
+  const types = {};
+  let logs = 0, checked = 0, added = 0, failed = 0;
+
+  async function lookUp(tag) {
+    checked++;
+    try {
+      const full = await api(`/players/${enc(tag)}`);
+      if (savePlayer(full)) {
+        added++;
+        if (full.clan?.tag) queueCandidate(full.clan.tag);
+        fresh.push(tag);
+      } else misses[tag] = Date.now();
+    } catch (e) {
+      if (e.notFound) misses[tag] = Date.now();
+      else { failed++; if (failed <= 5) console.error(`battle discovery: player ${tag}: ${e.message}`); }
+    }
+  }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
+    let tag;
+    while (Date.now() < deadline && (tag = nextTag())) {
+      if (!store.players[tag]) continue;
+      let log;
+      try { log = await api(`/players/${enc(tag)}/battlelog`); }
+      catch (e) {
+        if (!e.notFound) { failed++; if (failed <= 5) console.error(`battle discovery: log ${tag}: ${e.message}`); }
+        scanned[tag] = Date.now();
+        continue;
+      }
+      scanned[tag] = Date.now(); logs++;
+      for (const b of (Array.isArray(log) ? log : log.items) || []) {
+        const type = String(b.battleType || 'unknown');
+        types[type] = (types[type] || 0) + 1;
+        if (BATTLE_SKIP_TYPES.has(type.toLowerCase()) || !b.opponentPlayerTag) continue;
+        const opp = normalizeTag(b.opponentPlayerTag);
+        if (store.players[opp] || misses[opp] || seen.has(opp)) continue;
+        seen.add(opp);
+        await lookUp(opp);
+      }
+    }
+  }));
+
+  for (const t of Object.keys(scanned)) if (!store.players[t]) delete scanned[t];
+  const missKeys = Object.keys(misses);
+  if (missKeys.length > MISS_MAX) {
+    missKeys.sort((a, b) => misses[a] - misses[b]).slice(0, missKeys.length - MISS_MAX).forEach(t => delete misses[t]);
+  }
+  const waiting = (frontier.length - fi) + fresh.length;
+  console.log(`battle discovery: read ${logs} log(s), checked ${checked} unknown opponent(s), added ${added} Legend I player(s), `
+    + `${waiting} known player(s) still waiting for a scan, ${failed} error(s) in ${Math.round((Date.now() - t0) / 1000)}s`);
+  console.log(`battle types seen: ${JSON.stringify(types)}`);
+}
+
 // ---------- run ----------
 const eod = endOfDayIfDue();
 
@@ -271,6 +360,8 @@ await pool(Object.keys(store.clans), CONCURRENCY, async t => {
 const stragglers = Object.keys(store.players).filter(t => (store.players[t].updated || 0) < refreshStart);
 console.log(`refresh: ${Object.keys(store.clans).length} clan(s), ${stragglers.length} straggler(s)`);
 await pool(stragglers, CONCURRENCY, fetchPlayer);
+
+await battleDiscovery();
 
 // work through discovered clans + dictionary name search with whatever time is left
 let words = await readJson('scanner/dictionary.json', []);
