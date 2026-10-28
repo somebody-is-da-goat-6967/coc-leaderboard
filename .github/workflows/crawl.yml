@@ -1,8 +1,8 @@
 name: crawl-legend-board
 on:
   schedule:
-    - cron: '*/30 * * * *'
-    - cron: '50 4 * * *'   # extra run just before the 05:00 UTC Legend reset
+    - cron: '0,30 0-3,5-23 * * *'   # every 30 min, except hour 04 (quiet window before the 05:00 UTC reset)
+    - cron: '0,58 4 * * *'          # 04:00, then the end-of-day crawl at 04:58 (nothing between 04:30 and 04:58)
   workflow_dispatch:
     inputs:
       mode:
