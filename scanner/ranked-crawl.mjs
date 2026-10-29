@@ -3,12 +3,21 @@
 //
 // Layout written into DATA_DIR (the checked-out `ranked-data` branch):
 //   ranked/current.json                      summary of the latest run
-//   ranked/<weekStart YYYY-MM-DD>/state.json crawl cursor
+//   ranked/<weekStart YYYY-MM-DD>/state.json last run info
 //   ranked/<weekStart>/shards/th<N>.json.gz  one file per town hall (th0 = town hall unknown):
 //       { "#TAG": { th, n: name, b: [[time, atk, stars, pct, oppTag, armyCode, type, firstSeen, duration], ...] } }
 //       time/firstSeen are unix seconds (time 0 = the log had no battleTime); atk 1 = attack, 0 = defense
-//   Each player record also carries the profile data fetched from /players/<tag> (when PROFILES is on):
+//   Each player record also carries the profile data fetched from /players/<tag> (profile phase):
 //       n = name, th = current town hall, lg = [leagueId, leagueName], tr = trophies, pt = unix seconds of the profile fetch
+//   and scheduling data: lc = unix seconds of the last battle-log crawl, rt = recent battles per hour (smoothed).
+//
+// WHY SCHEDULING MATTERS: a battle log only holds the ~32 most recent ranked battles (attacks + defenses). A Legend III / Electro player
+// makes 18-30 attacks a week and takes as many defenses, so crawling them too rarely silently loses their oldest attacks (that is the
+// "stuck at 16 attacks" wall). Each run therefore crawls the players most likely to have overflowed their log first.
+//
+// MODE=trophies   short run (every 30 min): hottest battle logs first, then the stalest profiles (trophies / league)
+// MODE=battlelogs long run (every 4 h):    battle logs first (most urgent first), a small share for profiles
+// MAX_RPS         API requests per second this run may use (0 = unthrottled); MAX_MINUTES x MAX_RPS is the call budget
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -21,7 +30,12 @@ const OUT = env.DATA_DIR || 'data-out';
 const CONCURRENCY = Number(env.CONCURRENCY) || 25;
 const MAX_MINUTES = Number(env.MAX_MINUTES) || 100;
 const LIMIT = Number(env.LIMIT) || 0; // >0 = only crawl the first N tags (test runs)
-const PROFILES = env.PROFILES !== '0'; // 1 extra API call per player (name, town hall, league, trophies). PROFILES=0 turns it off.
+const MODE = (env.MODE || 'battlelogs').toLowerCase();
+const MAX_RPS = Number(env.MAX_RPS) || 0;
+const RISK_BATTLES = Number(env.RISK_BATTLES) || 8;     // crawl a player once we expect this many unseen battles in their log
+const MAX_AGE_H = Number(env.MAX_AGE_H) || 4;           // longest gap for players whose week can overflow the log (Electro / Legend)
+const PROFILE_TTL_MIN = Number(env.PROFILE_TTL_MIN) || (MODE === 'trophies' ? 25 : 120); // don't refetch a profile younger than this
+const PROFILE_SHARE = env.PROFILE_SHARE != null && env.PROFILE_SHARE !== '' ? Number(env.PROFILE_SHARE) : (MODE === 'trophies' ? 0.5 : MODE === 'battlelogs' ? 0.1 : 0.5);
 const BATTLE_TYPES = (env.BATTLE_TYPES || 'ranked,legend').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 // Tournament week window (UTC). dow: 0=Sunday ... 6=Saturday.
@@ -97,10 +111,16 @@ function saveShards(players) {
 }
 
 // ---------- API ----------
-let forbidden = 0;
+let forbidden = 0, slot = 0;
+async function throttle() { // spread requests evenly: at most MAX_RPS per second
+  if (!MAX_RPS) return;
+  const now = Date.now(); slot = Math.max(slot, now); const wait = slot - now; slot += 1000 / MAX_RPS;
+  if (wait > 0) await sleep(wait);
+}
 async function api(pathname) {
   for (let attempt = 0; attempt < 5; attempt++) {
     let res;
+    await throttle();
     try {
       res = await fetch(API_BASE + pathname, { headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' } });
     } catch { await sleep(1000 * 2 ** attempt); continue; }
@@ -136,7 +156,7 @@ const names = new Map(); // tag -> name, collected from the opponent fields of e
 
 function mergeLog(rec, log, nowSec) {
   const seen = new Set(rec.b.map(keyOf));
-  let added = 0;
+  let added = 0, entries = 0;
   for (const e of log.items || log || []) {
     if (e.opponentPlayerTag && e.opponentName) names.set(norm(e.opponentPlayerTag), e.opponentName);
     const type = String(e.battleType || '').toLowerCase();
@@ -147,11 +167,34 @@ function mergeLog(rec, log, nowSec) {
     const r = [t ? Math.floor(t / 1000) : 0, e.attack ? 1 : 0, e.stars ?? 0, e.destructionPercentage ?? 0,
                e.opponentPlayerTag || '', e.armyShareCode || '', type, nowSec,
                Number(e.duration ?? e.battleDuration) || 0];
+    entries++;
     const k = keyOf(r);
     if (seen.has(k)) continue;
     seen.add(k); rec.b.push(r); added++;
   }
-  return added;
+  return { added, entries, overlap: entries - added }; // overlap 0 with a full log = battles probably fell out unseen
+}
+
+// ---------- scheduling ----------
+const ATK = [[/^(skeleton|barbarian)/, 6], [/^(archer|wizard)/, 8], [/^(valkyrie|witch)/, 10], [/^(golem|pekka|titan)/, 12], [/^dragon/, 14], [/^electro/, 18]];
+function maxAtkOf(name) { // attacks a week allows in this league (Legend III 24, Legend II/I 30)
+  const n = String(name || '').trim().toLowerCase().replace(/\./g, '');
+  if (n.startsWith('legend')) return /(iii|3)\s*$/.test(n) ? 24 : 30;
+  for (const [re, v] of ATK) if (re.test(n)) return v;
+  return 30; // unknown league: assume the worst
+}
+// How soon a battle log must be read again. Leagues with <=14 attacks (<=28 entries incl. defenses) fit the log, so they can wait longer.
+const ageLimitH = (rec) => { const mx = maxAtkOf(rec?.lg?.[1]); return MAX_AGE_H * (mx >= 17 ? 1 : mx >= 11 ? 2 : 3); };
+// >= 1 means "due". Never-crawled players come first; otherwise the larger of (expected unseen battles / RISK) and (age / age limit).
+function urgency(rec, nowSec) {
+  if (!rec || !rec.lc) return 10;
+  const h = (nowSec - rec.lc) / 3600;
+  return Math.max(h * ((rec.rt ?? 1) + 0.3) / RISK_BATTLES, h / ageLimitH(rec));
+}
+function noteCrawl(rec, added, nowSec) { // smoothed battles-per-hour; the first crawl's dump is spread over a day
+  const h = rec.lc ? Math.max((nowSec - rec.lc) / 3600, 0.25) : 24, r = added / h;
+  rec.rt = rec.rt == null ? +r.toFixed(2) : +(0.5 * rec.rt + 0.5 * r).toFixed(2);
+  rec.lc = nowSec;
 }
 
 // ---------- main ----------
@@ -161,56 +204,75 @@ if (LIMIT) tags = tags.slice(0, LIMIT);
 
 const players = loadShards();
 const statePath = path.join(weekDir, 'state.json');
-let cursor = 0;
-try { cursor = JSON.parse(fs.readFileSync(statePath, 'utf8')).cursor || 0; } catch { /* first run of the week */ }
-cursor %= Math.max(tags.length, 1);
-const order = tags.slice(cursor).concat(tags.slice(0, cursor));
-
-console.log(`week ${weekKey} (${start.toISOString()} -> ${end.toISOString()}), ${tags.length} tags, start index ${cursor}, types=${BATTLE_TYPES}`);
-
-const deadline = Date.now() + MAX_MINUTES * 60000;
 const nowSec = Math.floor(Date.now() / 1000);
-let next = 0, done = 0, failed = 0, newBattles = 0, fatal = null, shapeLogged = false;
-const profiled = new Set(); // tags whose name came from their profile this run
+const deadline = Date.now() + MAX_MINUTES * 60000;
+const totalCalls = MAX_RPS ? Math.floor(MAX_RPS * MAX_MINUTES * 60 * 0.9) : Infinity;
+const profQuota = totalCalls === Infinity ? Infinity : Math.floor(totalCalls * PROFILE_SHARE);
 
-async function worker() {
-  while (!fatal && next < order.length && Date.now() < deadline) {
-    const tag = order[next++];
-    try {
-      const enc = encodeURIComponent(tag);
-      const [log, prof] = await Promise.all([api(`/players/${enc}/battlelog`), PROFILES ? api(`/players/${enc}`) : null]);
-      if (log === undefined) failed++;
-      if (log === null || (log === undefined && !prof)) continue; // player gone, or both calls failed
-      const rec = players.get(tag) || { th: null, b: [] };
-      if (seeds.get(tag) != null) rec.th = seeds.get(tag);
-      if (prof) {
-        if (!shapeLogged) { shapeLogged = true; console.log('first profile:', JSON.stringify({ name: prof.name, th: prof.townHallLevel, trophies: prof.trophies, leagueTier: prof.leagueTier, league: prof.league })); }
-        applyProfile(rec, prof, nowSec); profiled.add(tag);
-      }
-      if (log) newBattles += mergeLog(rec, log, nowSec);
-      if (rec.b.length || rec.lg) players.set(tag, rec);
-    } catch (e) { fatal = e; }
-    if (++done % 2000 === 0) console.log(`  ${done}/${order.length} players, +${newBattles} battles, ${failed} failed`);
-  }
+// who needs a battle-log crawl (most urgent first; ties go to the leagues that overflow the log) and whose profile is stalest
+const mxOf = (tag) => maxAtkOf(players.get(tag)?.lg?.[1]);
+const logJobs = tags.map((tag) => ({ tag, u: urgency(players.get(tag), nowSec), mx: mxOf(tag) })).filter((j) => j.u >= 1)
+  .sort((a, b) => b.u - a.u || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
+const profJobs = tags.map((tag) => ({ tag, age: nowSec - (players.get(tag)?.pt || 0), mx: mxOf(tag) })).filter((j) => j.age >= PROFILE_TTL_MIN * 60)
+  .sort((a, b) => b.age - a.age || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
+console.log(`week ${weekKey} (${start.toISOString()} -> ${end.toISOString()}), ${tags.length} tags, mode=${MODE}, rps=${MAX_RPS || 'unlimited'}, ${MAX_MINUTES} min, calls<=${totalCalls}, types=${BATTLE_TYPES}`);
+console.log(`queued: ${logJobs.length} battle logs due, ${profJobs.length} profiles due (profile share ${PROFILE_SHARE})`);
+
+let failed = 0, newBattles = 0, gaps = 0, fatal = null, shapeLogged = false, logsDone = 0;
+const profiled = new Set();
+
+async function doLog(tag) {
+  const log = await api(`/players/${encodeURIComponent(tag)}/battlelog`);
+  if (log === undefined) { failed++; return; }
+  const rec = players.get(tag) || { th: null, b: [] };
+  if (!rec.pt && seeds.get(tag) != null) rec.th = seeds.get(tag); // the seed's town hall only until a profile knows better
+  if (log === null) { rec.lc = nowSec; rec.rt = 0; players.set(tag, rec); return; } // player no longer exists
+  const had = rec.b.length > 0 && rec.lc;
+  const m = mergeLog(rec, log, nowSec);
+  newBattles += m.added; logsDone++;
+  if (had && m.entries >= 20 && m.overlap === 0) gaps++;
+  noteCrawl(rec, m.added, nowSec);
+  players.set(tag, rec);
 }
-await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+async function doProfile(tag) {
+  const p = await api(`/players/${encodeURIComponent(tag)}`);
+  if (p === undefined) { failed++; return; }
+  if (p === null) return;
+  const rec = players.get(tag) || { th: null, b: [] };
+  if (!shapeLogged) { shapeLogged = true; console.log('first profile:', JSON.stringify({ name: p.name, th: p.townHallLevel, trophies: p.trophies, leagueTier: p.leagueTier, league: p.league })); }
+  applyProfile(rec, p, nowSec); profiled.add(tag);
+  players.set(tag, rec);
+}
+// Workers pull jobs until the list, the call quota or the clock runs out; returns the calls spent.
+async function runPhase(jobs, quota, fn) {
+  let i = 0, used = 0;
+  async function worker() {
+    while (!fatal && i < jobs.length && used < quota && Date.now() < deadline) {
+      used++; const j = jobs[i++];
+      try { await fn(j.tag); } catch (e) { fatal = e; }
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  return used;
+}
 
-// every index below `next` was dispatched; resume from there next run (wraps)
-const processed = Math.min(next, order.length);
-const newCursor = tags.length ? (cursor + (processed >= order.length ? 0 : processed)) % tags.length : 0;
+const logUsed = await runPhase(logJobs, totalCalls === Infinity ? Infinity : totalCalls - profQuota, doLog);
+const profUsed = await runPhase(profJobs, totalCalls === Infinity ? Infinity : totalCalls - logUsed, doProfile); // unused log calls flow to profiles
 
-for (const [tag, rec] of players) if (names.has(tag) && !profiled.has(tag)) rec.n = names.get(tag); // opponent names only fill gaps; profile names win
+for (const [tag, rec] of players) if (!rec.n && names.has(tag)) rec.n = names.get(tag); // opponent names only fill gaps; profile names win
 saveShards(players);
 fs.mkdirSync(weekDir, { recursive: true });
-fs.writeFileSync(statePath, JSON.stringify({ cursor: newCursor }));
-let totalBattles = 0, withBattles = 0, withLeague = 0;
-for (const v of players.values()) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; }
+fs.writeFileSync(statePath, JSON.stringify({ mode: MODE, ranAt: new Date().toISOString() }));
+let totalBattles = 0, withBattles = 0, withLeague = 0, dueAfter = 0;
+for (const [tag, v] of players) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; if (urgency(v, nowSec + 1800) >= 1) dueAfter++; }
 fs.writeFileSync(path.join(OUT, 'ranked', 'current.json'), JSON.stringify({
-  weekKey, start: start.toISOString(), end: end.toISOString(), updatedAt: new Date().toISOString(),
-  tagsInSeed: tags.length, crawledThisRun: processed, failedThisRun: failed,
-  playersTracked: players.size, playersWithBattles: withBattles, playersWithLeague: withLeague, profilesThisRun: profiled.size, battles: totalBattles, battleTypesSeen: typeCounts,
+  weekKey, start: start.toISOString(), end: end.toISOString(), updatedAt: new Date().toISOString(), mode: MODE,
+  tagsInSeed: tags.length, crawledThisRun: logsDone, failedThisRun: failed, logsDueAtStart: logJobs.length, profilesDueAtStart: profJobs.length,
+  gapsThisRun: gaps, profilesThisRun: profiled.size, callsUsed: logUsed + profUsed, callBudget: totalCalls === Infinity ? null : totalCalls,
+  playersTracked: players.size, playersWithBattles: withBattles, playersWithLeague: withLeague, battles: totalBattles, battleTypesSeen: typeCounts,
 }, null, 1));
 
-console.log(`done: ${processed}/${order.length} crawled, ${failed} failed, +${newBattles} new battles, ${totalBattles} total`);
+console.log(`done: ${logsDone} logs + ${profiled.size} profiles (${logUsed + profUsed} calls), ${failed} failed, +${newBattles} new battles, ${totalBattles} total`);
+console.log(`possible gaps (full log, nothing already known in it): ${gaps}; battle logs still due after this run: ${logJobs.length - logsDone}`);
 console.log('battleType counts seen in logs:', typeCounts);
 if (fatal) { console.error(fatal.message); process.exit(1); }
