@@ -10,13 +10,18 @@
 //   Each player record also carries the profile data fetched from /players/<tag> (profile phase):
 //       n = name, th = current town hall, lg = [leagueId, leagueName], tr = trophies, pt = unix seconds of the profile fetch
 //   and scheduling data: lc = unix seconds of the last battle-log crawl, rt = recent battles per hour (smoothed).
+//   Ranked tournament data comes from the league group (100 players per group), found via the profile:
+//     /players/<tag>  ->  currentLeagueGroupTag + currentLeagueSeasonId (and the previous* pair)
+//     /leaguegroup/<groupTag>/<seasonId>  ->  every member's exact weekly totals
+//       cg = [groupTag, seasonId], pg = previous week's pair, gw = [attackWins, attackLosses, defenseWins, defenseLosses] (exact, from the game),
+//       tr = leagueTrophies (this week's ranked trophies), gr = rank inside the group, gf = unix seconds of the group fetch
 //
 // WHY SCHEDULING MATTERS: a battle log only holds the ~32 most recent ranked battles (attacks + defenses). A Legend III / Electro player
 // makes 18-30 attacks a week and takes as many defenses, so crawling them too rarely silently loses their oldest attacks (that is the
 // "stuck at 16 attacks" wall). Each run therefore crawls the players most likely to have overflowed their log first.
 //
-// MODE=trophies   short run (every 30 min): hottest battle logs first, then the stalest profiles (trophies / league)
-// MODE=battlelogs long run (every 4 h):    battle logs first (most urgent first), a small share for profiles
+// MODE=trophies   short run (every 30 min): hottest battle logs, then the stalest league groups (trophies, exact attack counts), then profiles
+// MODE=battlelogs long run (every 4 h):    mostly battle logs (most urgent first), small shares for groups and profiles
 // MAX_RPS         API requests per second this run may use (0 = unthrottled); MAX_MINUTES x MAX_RPS is the call budget
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,8 +39,10 @@ const MODE = (env.MODE || 'battlelogs').toLowerCase();
 const MAX_RPS = Number(env.MAX_RPS) || 0;
 const RISK_BATTLES = Number(env.RISK_BATTLES) || 8;     // crawl a player once we expect this many unseen battles in their log
 const MAX_AGE_H = Number(env.MAX_AGE_H) || 4;           // longest gap for players whose week can overflow the log (Electro / Legend)
-const PROFILE_TTL_MIN = Number(env.PROFILE_TTL_MIN) || (MODE === 'trophies' ? 25 : 120); // don't refetch a profile younger than this
-const PROFILE_SHARE = env.PROFILE_SHARE != null && env.PROFILE_SHARE !== '' ? Number(env.PROFILE_SHARE) : (MODE === 'trophies' ? 0.5 : MODE === 'battlelogs' ? 0.1 : 0.5);
+const PROFILE_TTL_MIN = Number(env.PROFILE_TTL_MIN) || 360;   // league name / town hall / group tag only change at week rollover or on upgrade
+const GROUP_TTL_MIN = Number(env.GROUP_TTL_MIN) || (MODE === 'trophies' ? 25 : 120); // don't refetch a league group younger than this
+const share = (name, trophies, logs) => (env[name] != null && env[name] !== '' ? Number(env[name]) : MODE === 'trophies' ? trophies : logs);
+const LOG_SHARE = share('LOG_SHARE', 0.35, 0.8), GROUP_SHARE = share('GROUP_SHARE', 0.45, 0.1); // profiles get whatever is left
 const BATTLE_TYPES = (env.BATTLE_TYPES || 'ranked,legend').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 // Tournament week window (UTC). dow: 0=Sunday ... 6=Saturday.
@@ -143,7 +150,9 @@ function applyProfile(rec, p, nowSec) {
   if (p.townHallLevel) rec.th = p.townHallLevel;
   const lg = p.leagueTier || p.league;
   rec.lg = lg && lg.id != null ? [lg.id, lg.name || ''] : [0, 'Unranked'];
-  rec.tr = p.trophies ?? 0;
+  if (!rec.gf) rec.tr = p.trophies ?? 0; // until the league group gives the real weekly ranked trophies
+  if (p.currentLeagueGroupTag && p.currentLeagueSeasonId) rec.cg = [p.currentLeagueGroupTag, p.currentLeagueSeasonId];
+  if (p.previousLeagueGroupTag && p.previousLeagueSeasonId) rec.pg = [p.previousLeagueGroupTag, p.previousLeagueSeasonId];
   rec.pt = nowSec;
 }
 
@@ -174,6 +183,10 @@ function mergeLog(rec, log, nowSec) {
   }
   return { added, entries, overlap: entries - added }; // overlap 0 with a full log = battles probably fell out unseen
 }
+
+// A league season id is the unix time the tournament week opens; it belongs to this crawler week if it falls within a couple of days of it.
+const isThisWeek = (season) => Math.abs(season * 1000 - start.getTime()) < 2 * 864e5;
+const groupOk = (rec) => !!(rec && rec.cg && isThisWeek(rec.cg[1]));
 
 // ---------- scheduling ----------
 const ATK = [[/^(skeleton|barbarian)/, 6], [/^(archer|wizard)/, 8], [/^(valkyrie|witch)/, 10], [/^(golem|pekka|titan)/, 12], [/^dragon/, 14], [/^electro/, 18]];
@@ -207,21 +220,30 @@ const statePath = path.join(weekDir, 'state.json');
 const nowSec = Math.floor(Date.now() / 1000);
 const deadline = Date.now() + MAX_MINUTES * 60000;
 const totalCalls = MAX_RPS ? Math.floor(MAX_RPS * MAX_MINUTES * 60 * 0.9) : Infinity;
-const profQuota = totalCalls === Infinity ? Infinity : Math.floor(totalCalls * PROFILE_SHARE);
 
 // who needs a battle-log crawl (most urgent first; ties go to the leagues that overflow the log) and whose profile is stalest
 const mxOf = (tag) => maxAtkOf(players.get(tag)?.lg?.[1]);
 const logJobs = tags.map((tag) => ({ tag, u: urgency(players.get(tag), nowSec), mx: mxOf(tag) })).filter((j) => j.u >= 1)
   .sort((a, b) => b.u - a.u || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
-const profJobs = tags.map((tag) => ({ tag, age: nowSec - (players.get(tag)?.pt || 0), mx: mxOf(tag) })).filter((j) => j.age >= PROFILE_TTL_MIN * 60)
-  .sort((a, b) => b.age - a.age || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
+// profiles: first anyone without a league / this week's group tag, then the stalest
+const profJobs = tags.map((tag) => { const r = players.get(tag); return { tag, need: !r?.pt || !groupOk(r) ? 1 : 0, age: nowSec - (r?.pt || 0), mx: mxOf(tag) }; })
+  .filter((j) => j.need || j.age >= PROFILE_TTL_MIN * 60).sort((a, b) => b.need - a.need || b.age - a.age || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
+// league groups of the tracked players (one call serves every tracked member of a group), stalest first
+const groupMap = new Map();
+for (const [tag, r] of players) {
+  if (!groupOk(r)) continue;
+  const key = r.cg[0] + '|' + r.cg[1]; let g = groupMap.get(key);
+  if (!g) groupMap.set(key, (g = { tag: r.cg[0], season: r.cg[1], oldest: Infinity, mx: 0 }));
+  g.oldest = Math.min(g.oldest, r.gf || 0); g.mx = Math.max(g.mx, maxAtkOf(r.lg?.[1]));
+}
+const groupJobs = [...groupMap.values()].filter((g) => nowSec - g.oldest >= GROUP_TTL_MIN * 60).sort((a, b) => a.oldest - b.oldest || b.mx - a.mx);
 console.log(`week ${weekKey} (${start.toISOString()} -> ${end.toISOString()}), ${tags.length} tags, mode=${MODE}, rps=${MAX_RPS || 'unlimited'}, ${MAX_MINUTES} min, calls<=${totalCalls}, types=${BATTLE_TYPES}`);
-console.log(`queued: ${logJobs.length} battle logs due, ${profJobs.length} profiles due (profile share ${PROFILE_SHARE})`);
+console.log(`queued: ${logJobs.length} battle logs, ${groupJobs.length} league groups, ${profJobs.length} profiles due (shares: logs ${LOG_SHARE}, groups ${GROUP_SHARE}, rest profiles)`);
 
-let failed = 0, newBattles = 0, gaps = 0, fatal = null, shapeLogged = false, logsDone = 0;
+let failed = 0, newBattles = 0, gaps = 0, fatal = null, shapeLogged = false, logsDone = 0, groupsDone = 0, groupMembers = 0;
 const profiled = new Set();
 
-async function doLog(tag) {
+async function doLog({ tag }) {
   const log = await api(`/players/${encodeURIComponent(tag)}/battlelog`);
   if (log === undefined) { failed++; return; }
   const rec = players.get(tag) || { th: null, b: [] };
@@ -234,7 +256,7 @@ async function doLog(tag) {
   noteCrawl(rec, m.added, nowSec);
   players.set(tag, rec);
 }
-async function doProfile(tag) {
+async function doProfile({ tag }) {
   const p = await api(`/players/${encodeURIComponent(tag)}`);
   if (p === undefined) { failed++; return; }
   if (p === null) return;
@@ -243,36 +265,55 @@ async function doProfile(tag) {
   applyProfile(rec, p, nowSec); profiled.add(tag);
   players.set(tag, rec);
 }
+// One league group call updates every tracked member: exact weekly attack / defense counts and ranked trophies.
+async function doGroup(g) {
+  const res = await api(`/leaguegroup/${encodeURIComponent(g.tag)}/${g.season}`);
+  if (res === undefined) { failed++; return; }
+  groupsDone++;
+  const members = res?.members || [];
+  if (res && !members.length) return;
+  members.forEach((m, i) => {
+    const tag = norm(m.playerTag);
+    if (!seeds.has(tag)) return; // only players the crawler tracks
+    const rec = players.get(tag) || { th: seeds.get(tag), b: [] };
+    rec.gw = [m.attackWinCount || 0, m.attackLoseCount || 0, m.defenseWinCount || 0, m.defenseLoseCount || 0];
+    rec.tr = m.leagueTrophies ?? rec.tr ?? 0; rec.gr = i + 1; rec.cg = [g.tag, g.season]; rec.gf = nowSec;
+    if (m.playerName && !rec.n) rec.n = m.playerName;
+    players.set(tag, rec); groupMembers++;
+  });
+}
 // Workers pull jobs until the list, the call quota or the clock runs out; returns the calls spent.
 async function runPhase(jobs, quota, fn) {
   let i = 0, used = 0;
   async function worker() {
     while (!fatal && i < jobs.length && used < quota && Date.now() < deadline) {
       used++; const j = jobs[i++];
-      try { await fn(j.tag); } catch (e) { fatal = e; }
+      try { await fn(j); } catch (e) { fatal = e; }
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   return used;
 }
 
-const logUsed = await runPhase(logJobs, totalCalls === Infinity ? Infinity : totalCalls - profQuota, doLog);
-const profUsed = await runPhase(profJobs, totalCalls === Infinity ? Infinity : totalCalls - logUsed, doProfile); // unused log calls flow to profiles
+const T = totalCalls, lq = T === Infinity ? Infinity : Math.floor(T * LOG_SHARE);
+const logUsed = await runPhase(logJobs, lq, doLog);
+const groupUsed = await runPhase(groupJobs, T === Infinity ? Infinity : Math.floor(T * GROUP_SHARE) + (lq - logUsed), doGroup); // unused log calls flow on
+const profUsed = await runPhase(profJobs, T === Infinity ? Infinity : T - logUsed - groupUsed, doProfile);                      // profiles get the rest
 
 for (const [tag, rec] of players) if (!rec.n && names.has(tag)) rec.n = names.get(tag); // opponent names only fill gaps; profile names win
 saveShards(players);
 fs.mkdirSync(weekDir, { recursive: true });
 fs.writeFileSync(statePath, JSON.stringify({ mode: MODE, ranAt: new Date().toISOString() }));
-let totalBattles = 0, withBattles = 0, withLeague = 0, dueAfter = 0;
-for (const [tag, v] of players) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; if (urgency(v, nowSec + 1800) >= 1) dueAfter++; }
+let totalBattles = 0, withBattles = 0, withLeague = 0, withGroup = 0;
+for (const v of players.values()) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; if (v.gf) withGroup++; }
 fs.writeFileSync(path.join(OUT, 'ranked', 'current.json'), JSON.stringify({
   weekKey, start: start.toISOString(), end: end.toISOString(), updatedAt: new Date().toISOString(), mode: MODE,
-  tagsInSeed: tags.length, crawledThisRun: logsDone, failedThisRun: failed, logsDueAtStart: logJobs.length, profilesDueAtStart: profJobs.length,
-  gapsThisRun: gaps, profilesThisRun: profiled.size, callsUsed: logUsed + profUsed, callBudget: totalCalls === Infinity ? null : totalCalls,
-  playersTracked: players.size, playersWithBattles: withBattles, playersWithLeague: withLeague, battles: totalBattles, battleTypesSeen: typeCounts,
+  tagsInSeed: tags.length, crawledThisRun: logsDone, failedThisRun: failed, logsDueAtStart: logJobs.length, groupsDueAtStart: groupJobs.length, profilesDueAtStart: profJobs.length,
+  gapsThisRun: gaps, groupsThisRun: groupsDone, groupMembersUpdated: groupMembers, profilesThisRun: profiled.size, callsUsed: logUsed + groupUsed + profUsed, callBudget: totalCalls === Infinity ? null : totalCalls,
+  playersTracked: players.size, playersWithBattles: withBattles, playersWithLeague: withLeague, playersWithGroupData: withGroup, battles: totalBattles, battleTypesSeen: typeCounts,
 }, null, 1));
 
-console.log(`done: ${logsDone} logs + ${profiled.size} profiles (${logUsed + profUsed} calls), ${failed} failed, +${newBattles} new battles, ${totalBattles} total`);
+console.log(`done: ${logsDone} logs + ${groupsDone} groups (${groupMembers} players) + ${profiled.size} profiles (${logUsed + groupUsed + profUsed} calls), ${failed} failed, +${newBattles} new battles, ${totalBattles} total`);
 console.log(`possible gaps (full log, nothing already known in it): ${gaps}; battle logs still due after this run: ${logJobs.length - logsDone}`);
 console.log('battleType counts seen in logs:', typeCounts);
 if (fatal) { console.error(fatal.message); process.exit(1); }
