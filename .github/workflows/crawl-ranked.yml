@@ -51,7 +51,7 @@ jobs:
       - name: Crawl ranked
         if: steps.plan.outputs.skip != 'true'
         env:
-          COC_API_KEY: ${{ secrets.COC_API_KEY }}
+          COC_API_KEY: ${{ secrets.COC_API_KEY_ranked }}
           SEED_FILE: scanner/clashspot-townhall-tags-detailed.json
           LIMIT: ${{ github.event.inputs.limit || '0' }}
           MODE: ${{ steps.plan.outputs.mode }}          # trophies | battlelogs (read by ranked-crawl.mjs)
