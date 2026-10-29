@@ -7,6 +7,8 @@
 //   ranked/<weekStart>/shards/th<N>.json.gz  one file per town hall (th0 = town hall unknown):
 //       { "#TAG": { th, n: name, b: [[time, atk, stars, pct, oppTag, armyCode, type, firstSeen, duration], ...] } }
 //       time/firstSeen are unix seconds (time 0 = the log had no battleTime); atk 1 = attack, 0 = defense
+//   Each player record also carries the profile data fetched from /players/<tag> (when PROFILES is on):
+//       n = name, th = current town hall, lg = [leagueId, leagueName], tr = trophies, pt = unix seconds of the profile fetch
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -19,6 +21,7 @@ const OUT = env.DATA_DIR || 'data-out';
 const CONCURRENCY = Number(env.CONCURRENCY) || 25;
 const MAX_MINUTES = Number(env.MAX_MINUTES) || 100;
 const LIMIT = Number(env.LIMIT) || 0; // >0 = only crawl the first N tags (test runs)
+const PROFILES = env.PROFILES !== '0'; // 1 extra API call per player (name, town hall, league, trophies). PROFILES=0 turns it off.
 const BATTLE_TYPES = (env.BATTLE_TYPES || 'ranked,legend').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 // Tournament week window (UTC). dow: 0=Sunday ... 6=Saturday.
@@ -113,6 +116,17 @@ async function api(pathname) {
   return undefined; // gave up on this player this run
 }
 
+// ---------- profile (name, town hall, league, trophies) ----------
+// The API reports the ranked league as `leagueTier` (newer) and/or `league` (older field); use whichever is present.
+function applyProfile(rec, p, nowSec) {
+  if (p.name) rec.n = p.name;
+  if (p.townHallLevel) rec.th = p.townHallLevel;
+  const lg = p.leagueTier || p.league;
+  rec.lg = lg && lg.id != null ? [lg.id, lg.name || ''] : [0, 'Unranked'];
+  rec.tr = p.trophies ?? 0;
+  rec.pt = nowSec;
+}
+
 // ---------- battles ----------
 const keyOf = r => r[0]
   ? `${r[0]}|${r[1]}|${r[4]}`                       // time known: time + direction + opponent
@@ -156,20 +170,25 @@ console.log(`week ${weekKey} (${start.toISOString()} -> ${end.toISOString()}), $
 
 const deadline = Date.now() + MAX_MINUTES * 60000;
 const nowSec = Math.floor(Date.now() / 1000);
-let next = 0, done = 0, failed = 0, newBattles = 0, fatal = null;
+let next = 0, done = 0, failed = 0, newBattles = 0, fatal = null, shapeLogged = false;
+const profiled = new Set(); // tags whose name came from their profile this run
 
 async function worker() {
   while (!fatal && next < order.length && Date.now() < deadline) {
     const tag = order[next++];
     try {
-      const log = await api(`/players/${encodeURIComponent(tag)}/battlelog`);
-      if (log === undefined) { failed++; continue; }
-      if (log === null) continue;
+      const enc = encodeURIComponent(tag);
+      const [log, prof] = await Promise.all([api(`/players/${enc}/battlelog`), PROFILES ? api(`/players/${enc}`) : null]);
+      if (log === undefined) failed++;
+      if (log === null || (log === undefined && !prof)) continue; // player gone, or both calls failed
       const rec = players.get(tag) || { th: null, b: [] };
       if (seeds.get(tag) != null) rec.th = seeds.get(tag);
-      const added = mergeLog(rec, log, nowSec);
-      newBattles += added;
-      if (rec.b.length) players.set(tag, rec);
+      if (prof) {
+        if (!shapeLogged) { shapeLogged = true; console.log('first profile:', JSON.stringify({ name: prof.name, th: prof.townHallLevel, trophies: prof.trophies, leagueTier: prof.leagueTier, league: prof.league })); }
+        applyProfile(rec, prof, nowSec); profiled.add(tag);
+      }
+      if (log) newBattles += mergeLog(rec, log, nowSec);
+      if (rec.b.length || rec.lg) players.set(tag, rec);
     } catch (e) { fatal = e; }
     if (++done % 2000 === 0) console.log(`  ${done}/${order.length} players, +${newBattles} battles, ${failed} failed`);
   }
@@ -180,15 +199,16 @@ await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 const processed = Math.min(next, order.length);
 const newCursor = tags.length ? (cursor + (processed >= order.length ? 0 : processed)) % tags.length : 0;
 
-for (const [tag, rec] of players) if (names.has(tag)) rec.n = names.get(tag);
+for (const [tag, rec] of players) if (names.has(tag) && !profiled.has(tag)) rec.n = names.get(tag); // opponent names only fill gaps; profile names win
 saveShards(players);
 fs.mkdirSync(weekDir, { recursive: true });
 fs.writeFileSync(statePath, JSON.stringify({ cursor: newCursor }));
-let totalBattles = 0; for (const v of players.values()) totalBattles += v.b.length;
+let totalBattles = 0, withBattles = 0, withLeague = 0;
+for (const v of players.values()) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; }
 fs.writeFileSync(path.join(OUT, 'ranked', 'current.json'), JSON.stringify({
   weekKey, start: start.toISOString(), end: end.toISOString(), updatedAt: new Date().toISOString(),
   tagsInSeed: tags.length, crawledThisRun: processed, failedThisRun: failed,
-  playersWithBattles: players.size, battles: totalBattles, battleTypesSeen: typeCounts,
+  playersTracked: players.size, playersWithBattles: withBattles, playersWithLeague: withLeague, profilesThisRun: profiled.size, battles: totalBattles, battleTypesSeen: typeCounts,
 }, null, 1));
 
 console.log(`done: ${processed}/${order.length} crawled, ${failed} failed, +${newBattles} new battles, ${totalBattles} total`);
