@@ -1,38 +1,66 @@
 name: crawl-ranked-week
 on:
   schedule:
-    - cron: '17 */4 * * *'      # every 4 hours (the battle log only keeps the most recent battles)
+    - cron: '2,32 0-3,5-23 * * *'   # every 30 min: hottest battle logs + league groups (trophies, exact attack counts) + profiles (skips the 04:30-05:00 UTC quiet window)
+    - cron: '2 4 * * *'
+    - cron: '17 */4 * * *'          # heavy run every 4 hours: mostly battle logs, most urgent players first
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'trophies (short: hot logs + league groups + profiles) | battlelogs (long: mostly battle logs)'
+        default: 'trophies'
       limit:
         description: 'Only crawl the first N tags (0 = all). Use e.g. 200 for a first test run.'
         default: '0'
 concurrency:
-  group: crawl-ranked          # separate from the legend crawler's "crawl" group so they never block each other
+  group: crawl-ranked          # one ranked run at a time; separate from the legend crawler's "crawl" group
   cancel-in-progress: false
 permissions:
   contents: write
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 75
     steps:
+      - name: Pick mode and time budget
+        id: plan
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE="${{ github.event.inputs.mode }}"
+          elif [ "${{ github.event.schedule }}" = "17 */4 * * *" ]; then MODE=battlelogs
+          else MODE=trophies; fi
+          NOW=$(date -u +%s); H=$(date -u +%H); M=$(date -u +%M)
+          MIN=$((10#$H*60+10#$M))
+          # quiet window 04:30-04:58 UTC: the legend end-of-day crawl needs the whole API budget
+          if [ $MIN -ge 270 ] && [ $MIN -lt 298 ]; then echo "skip=true" >> $GITHUB_OUTPUT; exit 0; fi
+          # never run into the quiet window: stop by 04:25 UTC
+          BUDGET=$([ "$MODE" = battlelogs ] && echo 45 || echo 15)
+          if [ $MIN -lt 265 ] && [ $((265-MIN)) -lt $BUDGET ]; then BUDGET=$((265-MIN)); fi
+          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "mode=$MODE" >> $GITHUB_OUTPUT
+          echo "budget=$BUDGET" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
+        if: steps.plan.outputs.skip != 'true'
       - uses: actions/setup-node@v4
+        if: steps.plan.outputs.skip != 'true'
         with: { node-version: 20 }
       - name: Restore previous data (orphan 'ranked-data' branch)
+        if: steps.plan.outputs.skip != 'true'
         run: |
           URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           git clone --depth 1 --branch ranked-data "$URL" data-out || { mkdir data-out; git -C data-out init -q -b ranked-data; git -C data-out remote add origin "$URL"; }
-      - name: Crawl battle logs
+      - name: Crawl ranked
+        if: steps.plan.outputs.skip != 'true'
         env:
           COC_API_KEY: ${{ secrets.COC_API_KEY }}
           SEED_FILE: scanner/clashspot-townhall-tags-detailed.json
           LIMIT: ${{ github.event.inputs.limit || '0' }}
-          MAX_MINUTES: 110
+          MODE: ${{ steps.plan.outputs.mode }}          # trophies | battlelogs (read by ranked-crawl.mjs)
+          MAX_MINUTES: ${{ steps.plan.outputs.budget }}
+          MAX_RPS: 8                                    # leave headroom for the legend crawler on the same key
           NODE_OPTIONS: --max-old-space-size=4096
         run: node scanner/ranked-crawl.mjs
       - name: Archive finished weeks (one branch per week, keeps current + previous on ranked-data)
+        if: steps.plan.outputs.skip != 'true'
         continue-on-error: true
         working-directory: data-out
         run: |
@@ -45,6 +73,7 @@ jobs:
               && git push -q -f "$URL" "archive:ranked-archive-$key" ) && rm -rf "$d"
           done
       - name: Publish (single-commit branch so history never grows)
+        if: steps.plan.outputs.skip != 'true'
         working-directory: data-out
         run: |
           git config user.name "crawler"; git config user.email "crawler@users.noreply.github.com"
