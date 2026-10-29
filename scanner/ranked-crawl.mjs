@@ -4,11 +4,12 @@
 // Layout written into DATA_DIR (the checked-out `ranked-data` branch):
 //   ranked/current.json                      summary of the latest run
 //   ranked/<weekStart YYYY-MM-DD>/state.json crawl cursor
-//   ranked/<weekStart>/shards/<xx>.json.gz   { "#TAG": { th, b: [[t,atk,stars,pct,opp,armyCode,type,firstSeen], ...] } }
+//   ranked/<weekStart>/shards/th<N>.json.gz  one file per town hall (th0 = town hall unknown):
+//       { "#TAG": { th, n: name, b: [[time, atk, stars, pct, oppTag, armyCode, type, firstSeen, duration], ...] } }
+//       time/firstSeen are unix seconds (time 0 = the log had no battleTime); atk 1 = attack, 0 = defense
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import crypto from 'node:crypto';
 
 const env = process.env;
 const API_BASE = (env.COC_API_BASE || 'https://cocproxy.royaleapi.dev/v1').replace(/\/$/, '');
@@ -28,7 +29,7 @@ if (!API_KEY) { console.error('COC_API_KEY is not set'); process.exit(1); }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const norm = t => '#' + String(t).trim().replace(/^#/, '').toUpperCase();
-const shardOf = tag => crypto.createHash('sha1').update(tag).digest('hex').slice(0, 2);
+const shardOf = rec => 'th' + (rec.th || 0);
 
 // ---------- week window ----------
 function weekStartOf(now) {
@@ -83,9 +84,12 @@ function loadShards() {
 function saveShards(players) {
   fs.mkdirSync(shardDir, { recursive: true });
   const groups = {};
-  for (const [tag, v] of players) (groups[shardOf(tag)] ||= {})[tag] = v;
+  for (const [tag, v] of players) (groups[shardOf(v)] ||= {})[tag] = v;
   for (const [name, obj] of Object.entries(groups)) {
     fs.writeFileSync(path.join(shardDir, name + '.json.gz'), zlib.gzipSync(JSON.stringify(obj)));
+  }
+  for (const f of fs.readdirSync(shardDir)) { // drop shard files from older layouts
+    if (f.endsWith('.json.gz') && !groups[f.replace('.json.gz', '')]) fs.unlinkSync(path.join(shardDir, f));
   }
 }
 
@@ -114,18 +118,21 @@ const keyOf = r => r[0]
   ? `${r[0]}|${r[1]}|${r[4]}`                       // time known: time + direction + opponent
   : `${r[1]}|${r[4]}|${r[2]}|${r[3]}|${r[5]}`;      // no battleTime in the log: best-effort identity
 const typeCounts = {};
+const names = new Map(); // tag -> name, collected from the opponent fields of every log
 
 function mergeLog(rec, log, nowSec) {
   const seen = new Set(rec.b.map(keyOf));
   let added = 0;
   for (const e of log.items || log || []) {
+    if (e.opponentPlayerTag && e.opponentName) names.set(norm(e.opponentPlayerTag), e.opponentName);
     const type = String(e.battleType || '').toLowerCase();
     typeCounts[type] = (typeCounts[type] || 0) + 1;
     if (!BATTLE_TYPES.includes(type)) continue;
     const t = parseTime(e.battleTime);
     if (t !== null && (t < start.getTime() || t >= end.getTime())) continue;
     const r = [t ? Math.floor(t / 1000) : 0, e.attack ? 1 : 0, e.stars ?? 0, e.destructionPercentage ?? 0,
-               e.opponentPlayerTag || '', e.armyShareCode || '', type, nowSec];
+               e.opponentPlayerTag || '', e.armyShareCode || '', type, nowSec,
+               Number(e.duration ?? e.battleDuration) || 0];
     const k = keyOf(r);
     if (seen.has(k)) continue;
     seen.add(k); rec.b.push(r); added++;
@@ -173,6 +180,7 @@ await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 const processed = Math.min(next, order.length);
 const newCursor = tags.length ? (cursor + (processed >= order.length ? 0 : processed)) % tags.length : 0;
 
+for (const [tag, rec] of players) if (names.has(tag)) rec.n = names.get(tag);
 saveShards(players);
 fs.mkdirSync(weekDir, { recursive: true });
 fs.writeFileSync(statePath, JSON.stringify({ cursor: newCursor }));
