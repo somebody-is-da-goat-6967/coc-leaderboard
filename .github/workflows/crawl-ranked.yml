@@ -27,6 +27,7 @@ jobs:
       - name: Crawl battle logs
         env:
           COC_API_KEY: ${{ secrets.COC_API_KEY }}
+          SEED_FILE: scanner/clashspot-townhall-tags-detailed.json
           LIMIT: ${{ github.event.inputs.limit || '0' }}
           MAX_MINUTES: 110
           NODE_OPTIONS: --max-old-space-size=4096
