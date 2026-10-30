@@ -22,6 +22,7 @@
 //
 // MODE=trophies   short run (every 30 min): hottest battle logs, then the stalest league groups (trophies, exact attack counts), then profiles
 // MODE=battlelogs long run (every 4 h):    mostly battle logs (most urgent first), small shares for groups and profiles
+// MODE=catchup    manual run: finish everyone who is incomplete (no profile / never read / league group not fetched), groups first
 // MAX_RPS         API requests per second this run may use (0 = unthrottled); MAX_MINUTES x MAX_RPS is the call budget
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,7 +30,7 @@ import zlib from 'node:zlib';
 
 const env = process.env;
 const API_BASE = (env.COC_API_BASE || 'https://cocproxy.royaleapi.dev/v1').replace(/\/$/, '');
-const API_KEY = env.COC_API_KEY;
+const API_KEY = env.COC_API_KEY_RANKED || env.COC_API_KEY; // the ranked crawl has its own key
 const SEED_FILE = env.SEED_FILE || 'seeds/clashspot-townhall-tags.json';
 const OUT = env.DATA_DIR || 'data-out';
 const CONCURRENCY = Number(env.CONCURRENCY) || 25;
@@ -40,16 +41,15 @@ const MAX_RPS = Number(env.MAX_RPS) || 0;
 const RISK_BATTLES = Number(env.RISK_BATTLES) || 8;     // crawl a player once we expect this many unseen battles in their log
 const MAX_AGE_H = Number(env.MAX_AGE_H) || 4;           // longest gap for players whose week can overflow the log (Electro / Legend)
 const PROFILE_TTL_MIN = Number(env.PROFILE_TTL_MIN) || 360;   // league name / town hall / group tag only change at week rollover or on upgrade
-const GROUP_TTL_MIN = Number(env.GROUP_TTL_MIN) || (MODE === 'trophies' ? 25 : 120); // don't refetch a league group younger than this
-const share = (name, trophies, logs) => (env[name] != null && env[name] !== '' ? Number(env[name]) : MODE === 'trophies' ? trophies : logs);
-const LOG_SHARE = share('LOG_SHARE', 0.35, 0.8), GROUP_SHARE = share('GROUP_SHARE', 0.45, 0.1); // profiles get whatever is left
+const GROUP_TTL_MIN = Number(env.GROUP_TTL_MIN) || (MODE === 'battlelogs' ? 120 : 25); // don't refetch a league group younger than this
+const envShare = (n) => (env[n] != null && env[n] !== '' ? Number(env[n]) : null);
 const BATTLE_TYPES = (env.BATTLE_TYPES || 'ranked,legend').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 // Tournament week window (UTC). dow: 0=Sunday ... 6=Saturday.
 const START_DOW = Number(env.WEEK_START_DOW ?? 1), START_HOUR = Number(env.WEEK_START_HOUR ?? 17); // Monday 17:00
 const END_DOW = Number(env.WEEK_END_DOW ?? 0), END_HOUR = Number(env.WEEK_END_HOUR ?? 5);          // Sunday 05:00
 
-if (!API_KEY) { console.error('COC_API_KEY is not set'); process.exit(1); }
+if (!API_KEY) { console.error('COC_API_KEY_RANKED (or COC_API_KEY) is not set'); process.exit(1); }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const norm = t => '#' + String(t).trim().replace(/^#/, '').toUpperCase();
@@ -124,23 +124,33 @@ async function throttle() { // spread requests evenly: at most MAX_RPS per secon
   const now = Date.now(); slot = Math.max(slot, now); const wait = slot - now; slot += 1000 / MAX_RPS;
   if (wait > 0) await sleep(wait);
 }
+const apiErrors = {}, errSamples = {};
+async function noteErr(kind, res) { // count errors by endpoint:status and keep the first message of each so the cause is visible in current.json
+  const k = `${kind}:${res.status}`; apiErrors[k] = (apiErrors[k] || 0) + 1;
+  if (!errSamples[k]) { let t = ''; try { t = (await res.text()).slice(0, 300); } catch {} errSamples[k] = t; console.warn(`API ${k}: ${t}`); }
+}
 async function api(pathname) {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  const kind = pathname.split('/')[1];
+  for (let attempt = 0; attempt < 4; attempt++) {
     let res;
     await throttle();
     try {
       res = await fetch(API_BASE + pathname, { headers: { Authorization: `Bearer ${API_KEY}`, Accept: 'application/json' } });
-    } catch { await sleep(1000 * 2 ** attempt); continue; }
+    } catch { apiErrors[kind + ':network'] = (apiErrors[kind + ':network'] || 0) + 1; await sleep(Math.min(1000 * 2 ** attempt, 8000)); continue; }
     if (res.status === 200) return res.json();
-    if (res.status === 404) return null;          // player no longer exists
+    if (res.status === 404) return null;          // player / group no longer exists
+    await noteErr(kind, res);
     if (res.status === 403) {                      // bad key / IP not whitelisted
-      if (++forbidden > 20) throw new Error('Too many 403s: check COC_API_KEY and that the key allows the proxy IP 45.79.218.79');
+      if (++forbidden > 20) throw new Error(`Too many 403s: check the API key and that it allows the proxy IP 45.79.218.79. First message: ${errSamples[kind + ':403'] || ''}`);
       await sleep(1000); continue;
     }
-    const ra = Number(res.headers.get('retry-after'));
-    await sleep(ra ? ra * 1000 : 1500 * 2 ** attempt); // 429 / 5xx / maintenance
+    if (res.status === 429 || res.status === 408 || res.status >= 500) { // rate limit / server trouble: wait (capped) and retry
+      const ra = Number(res.headers.get('retry-after'));
+      await sleep(Math.min(ra ? ra * 1000 : 1500 * 2 ** attempt, 15000)); continue;
+    }
+    return undefined; // any other 4xx (bad request ...) will not get better by retrying
   }
-  return undefined; // gave up on this player this run
+  return undefined; // gave up on this one this run
 }
 
 // ---------- profile (name, town hall, league, trophies) ----------
@@ -225,27 +235,40 @@ const totalCalls = MAX_RPS ? Math.floor(MAX_RPS * MAX_MINUTES * 60 * 0.9) : Infi
 const mxOf = (tag) => maxAtkOf(players.get(tag)?.lg?.[1]);
 const logJobs = tags.map((tag) => ({ tag, u: urgency(players.get(tag), nowSec), mx: mxOf(tag) })).filter((j) => j.u >= 1)
   .sort((a, b) => b.u - a.u || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
-// profiles: first anyone without a league / this week's group tag, then the stalest
-const profJobs = tags.map((tag) => { const r = players.get(tag); return { tag, need: !r?.pt || !groupOk(r) ? 1 : 0, age: nowSec - (r?.pt || 0), mx: mxOf(tag) }; })
+// profiles: first anyone never profiled or still holding last week's group tag, then the stalest (players with no group tag just follow the TTL)
+const profJobs = tags.map((tag) => { const r = players.get(tag); return { tag, need: !r?.pt || (r.cg && !isThisWeek(r.cg[1])) ? 1 : 0, age: nowSec - (r?.pt || 0), mx: mxOf(tag) }; })
   .filter((j) => j.need || j.age >= PROFILE_TTL_MIN * 60).sort((a, b) => b.need - a.need || b.age - a.age || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
-// league groups of the tracked players (one call serves every tracked member of a group), stalest first
-const groupMap = new Map();
-for (const [tag, r] of players) {
-  if (!groupOk(r)) continue;
-  const key = r.cg[0] + '|' + r.cg[1]; let g = groupMap.get(key);
-  if (!g) groupMap.set(key, (g = { tag: r.cg[0], season: r.cg[1], oldest: Infinity, mx: 0 }));
-  g.oldest = Math.min(g.oldest, r.gf || 0); g.mx = Math.max(g.mx, maxAtkOf(r.lg?.[1]));
+// league groups of the tracked players (one call serves every tracked member of a group); never-fetched groups first, then stalest
+function buildGroupJobs() {
+  const m = new Map();
+  for (const [tag, r] of players) {
+    if (!groupOk(r)) continue;
+    const key = r.cg[0] + '|' + r.cg[1]; let g = m.get(key);
+    if (!g) m.set(key, (g = { tag: r.cg[0], season: r.cg[1], oldest: Infinity, mx: 0, tags: [] }));
+    g.oldest = Math.min(g.oldest, r.gf || 0); g.mx = Math.max(g.mx, maxAtkOf(r.lg?.[1])); g.tags.push(tag);
+  }
+  return [...m.values()].filter((g) => nowSec - g.oldest >= GROUP_TTL_MIN * 60).sort((a, b) => a.oldest - b.oldest || b.mx - a.mx);
 }
-const groupJobs = [...groupMap.values()].filter((g) => nowSec - g.oldest >= GROUP_TTL_MIN * 60).sort((a, b) => a.oldest - b.oldest || b.mx - a.mx);
+let groupJobs = buildGroupJobs();
+// "complete" = profile read, battle log read at least once, and (if the player is in a league group this week) the group fetched
+const incomplete = () => { let n = 0; for (const tag of tags) { const r = players.get(tag); if (!r || !r.pt || !r.lc || (groupOk(r) && !r.gf)) n++; } return n; };
+const incompleteAtStart = incomplete();
+const groupsNever = groupJobs.filter((g) => !g.oldest).length;
+// shares of the call budget: [battle logs, league groups]; profiles for new players come first (20%), leftover profiles get the rest
+const base = { trophies: [0.35, 0.45], battlelogs: [0.8, 0.1], catchup: [0.2, 0.6] }[MODE] || [0.5, 0.4];
+let [LOG_SHARE, GROUP_SHARE] = base;
+if (groupsNever && MODE !== 'catchup') { LOG_SHARE = Math.min(LOG_SHARE, MODE === 'trophies' ? 0.25 : 0.5); GROUP_SHARE = Math.max(GROUP_SHARE, MODE === 'trophies' ? 0.6 : 0.4); } // finish the groups first
+if (envShare('LOG_SHARE') != null) LOG_SHARE = envShare('LOG_SHARE');
+if (envShare('GROUP_SHARE') != null) GROUP_SHARE = envShare('GROUP_SHARE');
 console.log(`week ${weekKey} (${start.toISOString()} -> ${end.toISOString()}), ${tags.length} tags, mode=${MODE}, rps=${MAX_RPS || 'unlimited'}, ${MAX_MINUTES} min, calls<=${totalCalls}, types=${BATTLE_TYPES}`);
-console.log(`queued: ${logJobs.length} battle logs, ${groupJobs.length} league groups, ${profJobs.length} profiles due (shares: logs ${LOG_SHARE}, groups ${GROUP_SHARE}, rest profiles)`);
+console.log(`queued: ${logJobs.length} battle logs, ${groupJobs.length} league groups (${groupsNever} never fetched), ${profJobs.length} profiles due; ${incompleteAtStart} players incomplete (shares: logs ${LOG_SHARE}, groups ${GROUP_SHARE})`);
 
 let failed = 0, newBattles = 0, gaps = 0, fatal = null, shapeLogged = false, logsDone = 0, groupsDone = 0, groupMembers = 0;
 const profiled = new Set();
 
 async function doLog({ tag }) {
   const log = await api(`/players/${encodeURIComponent(tag)}/battlelog`);
-  if (log === undefined) { failed++; return; }
+  if (log === undefined) { failed++; return false; }
   const rec = players.get(tag) || { th: null, b: [] };
   if (!rec.pt && seeds.get(tag) != null) rec.th = seeds.get(tag); // the seed's town hall only until a profile knows better
   if (log === null) { rec.lc = nowSec; rec.rt = 0; players.set(tag, rec); return; } // player no longer exists
@@ -258,7 +281,7 @@ async function doLog({ tag }) {
 }
 async function doProfile({ tag }) {
   const p = await api(`/players/${encodeURIComponent(tag)}`);
-  if (p === undefined) { failed++; return; }
+  if (p === undefined) { failed++; return false; }
   if (p === null) return;
   const rec = players.get(tag) || { th: null, b: [] };
   if (!shapeLogged) { shapeLogged = true; console.log('first profile:', JSON.stringify({ name: p.name, th: p.townHallLevel, trophies: p.trophies, leagueTier: p.leagueTier, league: p.league })); }
@@ -268,37 +291,46 @@ async function doProfile({ tag }) {
 // One league group call updates every tracked member: exact weekly attack / defense counts and ranked trophies.
 async function doGroup(g) {
   const res = await api(`/leaguegroup/${encodeURIComponent(g.tag)}/${g.season}`);
-  if (res === undefined) { failed++; return; }
+  if (res === undefined) { failed++; return false; }
   groupsDone++;
-  const members = res?.members || [];
-  if (res && !members.length) return;
-  members.forEach((m, i) => {
+  const seen = new Set();
+  (res?.members || []).forEach((m, i) => {
     const tag = norm(m.playerTag);
     if (!seeds.has(tag)) return; // only players the crawler tracks
+    seen.add(tag);
     const rec = players.get(tag) || { th: seeds.get(tag), b: [] };
     rec.gw = [m.attackWinCount || 0, m.attackLoseCount || 0, m.defenseWinCount || 0, m.defenseLoseCount || 0];
     rec.tr = m.leagueTrophies ?? rec.tr ?? 0; rec.gr = i + 1; rec.cg = [g.tag, g.season]; rec.gf = nowSec;
     if (m.playerName && !rec.n) rec.n = m.playerName;
     players.set(tag, rec); groupMembers++;
   });
+  for (const t of g.tags) if (!seen.has(t)) { const r = players.get(t); if (r) r.gf = nowSec; } // group gone / member missing: don't ask again every run
 }
 // Workers pull jobs until the list, the call quota or the clock runs out; returns the calls spent.
-async function runPhase(jobs, quota, fn) {
-  let i = 0, used = 0;
+async function runPhase(jobs, quota, fn, label) {
+  let i = 0, used = 0, streak = 0, stop = false;
   async function worker() {
-    while (!fatal && i < jobs.length && used < quota && Date.now() < deadline) {
+    while (!fatal && !stop && i < jobs.length && used < quota && Date.now() < deadline) {
       used++; const j = jobs[i++];
-      try { await fn(j); } catch (e) { fatal = e; }
+      try {
+        if ((await fn(j)) === false) { if (++streak >= 40) { stop = true; console.warn(`${label}: 40 failures in a row, giving up on this phase for this run`); } } else streak = 0;
+      } catch (e) { fatal = e; }
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   return used;
 }
 
-const T = totalCalls, lq = T === Infinity ? Infinity : Math.floor(T * LOG_SHARE);
-const logUsed = await runPhase(logJobs, lq, doLog);
-const groupUsed = await runPhase(groupJobs, T === Infinity ? Infinity : Math.floor(T * GROUP_SHARE) + (lq - logUsed), doGroup); // unused log calls flow on
-const profUsed = await runPhase(profJobs, T === Infinity ? Infinity : T - logUsed - groupUsed, doProfile);                      // profiles get the rest
+const T = totalCalls, inf = T === Infinity, groupsDueAtStart = groupJobs.length;
+const needJobs = profJobs.filter((j) => j.need), restJobs = profJobs.filter((j) => !j.need);
+const needQ = inf ? Infinity : Math.floor(T * 0.2);
+const needUsed = await runPhase(needJobs, needQ, doProfile, 'profiles (new)');       // 1. never-profiled players: they unlock their league group
+groupJobs = buildGroupJobs();                                                         //    (rebuild: profiles just revealed more groups)
+const lq = inf ? Infinity : Math.floor(T * LOG_SHARE);
+const logUsed = await runPhase(logJobs, lq, doLog, 'battle logs');                   // 2. most urgent battle logs
+const groupUsed = await runPhase(groupJobs, inf ? Infinity : Math.floor(T * GROUP_SHARE) + Math.max(0, lq - logUsed), doGroup, 'league groups'); // 3. league groups
+const restUsed = await runPhase(restJobs, inf ? Infinity : T - needUsed - logUsed - groupUsed, doProfile, 'profiles (refresh)');              // 4. stale profiles get the rest
+const profUsed = needUsed + restUsed;
 
 for (const [tag, rec] of players) if (!rec.n && names.has(tag)) rec.n = names.get(tag); // opponent names only fill gaps; profile names win
 saveShards(players);
@@ -308,11 +340,12 @@ let totalBattles = 0, withBattles = 0, withLeague = 0, withGroup = 0;
 for (const v of players.values()) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; if (v.gf) withGroup++; }
 fs.writeFileSync(path.join(OUT, 'ranked', 'current.json'), JSON.stringify({
   weekKey, start: start.toISOString(), end: end.toISOString(), updatedAt: new Date().toISOString(), mode: MODE,
-  tagsInSeed: tags.length, crawledThisRun: logsDone, failedThisRun: failed, logsDueAtStart: logJobs.length, groupsDueAtStart: groupJobs.length, profilesDueAtStart: profJobs.length,
+  tagsInSeed: tags.length, crawledThisRun: logsDone, failedThisRun: failed, logsDueAtStart: logJobs.length, groupsDueAtStart: groupsDueAtStart, groupsNeverFetchedAtStart: groupsNever, profilesDueAtStart: profJobs.length, incompleteAtStart, incompleteLeft: incomplete(), apiErrors, apiErrorSamples: errSamples,
   gapsThisRun: gaps, groupsThisRun: groupsDone, groupMembersUpdated: groupMembers, profilesThisRun: profiled.size, callsUsed: logUsed + groupUsed + profUsed, callBudget: totalCalls === Infinity ? null : totalCalls,
   playersTracked: players.size, playersWithBattles: withBattles, playersWithLeague: withLeague, playersWithGroupData: withGroup, battles: totalBattles, battleTypesSeen: typeCounts,
 }, null, 1));
 
+console.log(`incomplete players: ${incompleteAtStart} before, ${incomplete()} after; API errors:`, apiErrors);
 console.log(`done: ${logsDone} logs + ${groupsDone} groups (${groupMembers} players) + ${profiled.size} profiles (${logUsed + groupUsed + profUsed} calls), ${failed} failed, +${newBattles} new battles, ${totalBattles} total`);
 console.log(`possible gaps (full log, nothing already known in it): ${gaps}; battle logs still due after this run: ${logJobs.length - logsDone}`);
 console.log('battleType counts seen in logs:', typeCounts);
