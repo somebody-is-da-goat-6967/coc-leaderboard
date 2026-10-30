@@ -12,7 +12,7 @@
 //   and scheduling data: lc = unix seconds of the last battle-log crawl, rt = recent battles per hour (smoothed).
 //   Ranked tournament data comes from the league group (100 players per group), found via the profile:
 //     /players/<tag>  ->  currentLeagueGroupTag + currentLeagueSeasonId (and the previous* pair)
-//     /leaguegroup/<groupTag>/<seasonId>  ->  every member's exact weekly totals
+//     /leaguegroup/<groupTag>/<seasonId>?playerTag=<a tracked member>  ->  every member's exact weekly totals
 //       cg = [groupTag, seasonId], pg = previous week's pair, gw = [attackWins, attackLosses, defenseWins, defenseLosses] (exact, from the game),
 //       tr = leagueTrophies (this week's ranked trophies), gr = rank inside the group, gf = unix seconds of the group fetch
 //
@@ -290,7 +290,8 @@ async function doProfile({ tag }) {
 }
 // One league group call updates every tracked member: exact weekly attack / defense counts and ranked trophies.
 async function doGroup(g) {
-  const res = await api(`/leaguegroup/${encodeURIComponent(g.tag)}/${g.season}`);
+  // The endpoint needs a playerTag (it returns that one player's attack/defense logs next to the 100 members); any tracked member will do.
+  const res = await api(`/leaguegroup/${encodeURIComponent(g.tag)}/${g.season}?playerTag=${encodeURIComponent(g.tags[0])}`);
   if (res === undefined) { failed++; return false; }
   groupsDone++;
   const seen = new Set();
