@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 2;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json
+const SCRIPT_REV = 3;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths
 const MIN_TH = 7, MAX_TH = 17;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -387,7 +387,7 @@ function processWeek(opts, key) {
     const byRate = all.filter(g => g.players >= minP && g.uses >= 10).sort((a, b) => wilson(b.s3, b.uses) - wilson(a.s3, a.uses) || b.uses - a.uses).slice(0, MAX_BEST_GROUPS);
     const chosen = [...new Set([...byUse, ...byRate])];
     const grp = g => ({
-      key: g.key, label: groupLabel(g.key), ids: g.key ? g.key.split(',').map(Number) : [], players: g.players, uses: g.uses, st: g.st, s3: g.s3, pct: g.pc, dur: g.dur,
+      key: g.key, label: groupLabel(g.key), ids: g.key ? g.key.split(',').map(Number) : [], icons: g.key ? g.key.split(',').map(id => (SITE.ARMY_IDS.troop[id] || [])[1] || null) : [], players: g.players, uses: g.uses, st: g.st, s3: g.s3, pct: g.pc, dur: g.dur,
       code: [...g.vars.values()].sort((a, b) => b.players - a.players || b.uses - a.uses)[0].code, variations: g.vars.size,
       variants: [...g.vars.values()].sort((a, b) => b.players - a.players || b.uses - a.uses).slice(0, MAX_VARIANTS).map(v => ({ code: v.code, players: v.players, uses: v.uses, st: v.st, s3: v.s3, pct: v.pc, dur: v.dur })),
     });
