@@ -9,6 +9,7 @@
 //     meta.json              week, thresholds, definitions, id -> name table, input hash
 //     summary.json           G totals for every scope (all + each town hall)
 //     scopes/th<N>.json      G totals + top lists for one town hall      (scopes/all.json = everyone)
+//     ranks/th<N>.json       sort keys of every qualified player in that town hall (lets the bot rank someone who is not in the data yet)
 //     armies/th<N>.json      armies, hero line-ups, openers, strategies (+ top performers), Dragon Duke, siege, troop/spell/pet/equipment usage
 //     players/<xx>.json.gz   one file per last-two-characters-of-tag; tag -> full player record with ranks
 //   ranked/stats-current.json  pointer to the newest week that has stats
@@ -24,6 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
+const SCRIPT_REV = 2;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json
 const MIN_TH = 7, MAX_TH = 17;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -215,6 +217,27 @@ const tops = L => ({
   zero: (L.zero || []).slice(0, TOP_N).map(topRow), fastest: (L.fastest || []).slice(0, TOP_N).map(topRow),
 });
 
+// Compact "rank pool" for one town hall: the sort keys of every QUALIFIED player, best first, so the bot can place a player
+// who is not in the data yet (or whose numbers just changed) by binary search without downloading anybody else's record.
+// Entries are [primary, secondary] in exactly the order METRICS sorts them (see townhallStats.js, which mirrors it):
+//   global [leagueId, trophies] | attack [wilson 3★ rate, attacks] | stars [stars/attack, attacks] | most3 [3★ count, attacks]
+//   defense [stars conceded/defense, defenses] | zero [0★ defenses, defenses] | league { leagueId: [trophies, ...] } (trophies, best first)
+const r6 = v => Math.round(v * 1e6) / 1e6;
+function rankPool(L) {
+  const league = {};
+  for (const r of L.global || []) (league[r.lid] || (league[r.lid] = [])).push(r.tr);
+  return {
+    minAttacks: MIN_ATK, minDefenses: MIN_DEF,
+    global: (L.global || []).map(r => [r.lid, r.tr]),
+    league,
+    attack: (L.attack || []).map(r => [r6(r.w3), r.na]),
+    stars: (L.stars || []).map(r => [r6(r.st / r.na), r.na]),
+    most3: (L.most3 || []).map(r => [r.s3, r.na]),
+    defense: (L.defense || []).map(r => [r6(r.dst / r.nd), r.nd]),
+    zero: (L.zero || []).map(r => [r.dz, r.nd]),
+  };
+}
+
 // ---------- one week ----------
 function processWeek(opts, key) {
   const root = path.join(opts.data, 'ranked', key);
@@ -227,7 +250,7 @@ function processWeek(opts, key) {
 
   if (!SITE) SITE = loadSite(opts.src);
   const bufs = files.map(f => ({ ...f, hash: sha1(fs.readFileSync(f.file)) }));
-  const inputHash = sha1(JSON.stringify([SCHEMA, bufs.map(b => [b.th, b.hash]), SITE.hash]));
+  const inputHash = sha1(JSON.stringify([SCHEMA, SCRIPT_REV, bufs.map(b => [b.th, b.hash]), SITE.hash]));
   const statsDir = path.join(root, 'stats');
   try {
     const old = JSON.parse(fs.readFileSync(path.join(statsDir, 'meta.json'), 'utf8'));
@@ -355,6 +378,7 @@ function processWeek(opts, key) {
     const L = k === 'all' ? allPool.lists.get('all') : thPool.lists.get(+k.slice(2));
     if (!t.G.tracked) continue;
     writeJson(path.join(statsDir, 'scopes', `${k}.json`), { schema: SCHEMA, scope: k, week, generatedAt, G: t.G, tops: L ? tops(L) : tops({}) });
+    if (k !== 'all' && L) writeJson(path.join(statsDir, 'ranks', `${k}.json`), { schema: SCHEMA, scope: k, week, generatedAt, ...rankPool(L) });
 
     // armies: top by players + best 3★ rate (min players / attacks), so "best armies" lists have material too
     const minP = Math.max(2, Math.min(5, Math.round(t.withCode / 100)));
