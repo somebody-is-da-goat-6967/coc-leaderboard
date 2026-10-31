@@ -1,0 +1,47 @@
+{
+ "weekKey": "2026-10-26",
+ "start": "2026-10-26T17:00:00.000Z",
+ "end": "2026-11-01T05:00:00.000Z",
+ "updatedAt": "2026-10-31T22:14:30.045Z",
+ "mode": "trophies",
+ "tagsInSeed": 57936,
+ "crawledThisRun": 3959,
+ "failedThisRun": 0,
+ "logsDueAtStart": 3959,
+ "groupsDueAtStart": 21621,
+ "groupsNeverFetchedAtStart": 0,
+ "profilesDueAtStart": 3240,
+ "incompleteAtStart": 5,
+ "incompleteLeft": 5,
+ "apiErrors": {
+  "leaguegroup:525": 6,
+  "leaguegroup:520": 11,
+  "leaguegroup:500": 8,
+  "players:500": 11,
+  "players:520": 8,
+  "players:525": 8
+ },
+ "apiErrorSamples": {
+  "leaguegroup:525": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-525/\",\"title\":\"Error 525: SSL handshake failed\",\"status\":525,\"detail\":\"The SSL/TLS handshake between Cloudflare and the origin server failed. The origin's SSL configuration is not compati",
+  "leaguegroup:520": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/\",\"title\":\"Error 520: Web server is returning an unknown error\",\"status\":520,\"detail\":\"The origin web server sent a response that Cloudflare could not parse. This may indicate the ori",
+  "leaguegroup:500": "<html>\r\n<head><title>500 Internal Server Error</title></head>\r\n<body>\r\n<center><h1>500 Internal Server Error</h1></center>\r\n<hr><center>nginx/1.18.0 (Ubuntu)</center>\r\n</body>\r\n</html>\r\n",
+  "players:500": "<html>\r\n<head><title>500 Internal Server Error</title></head>\r\n<body>\r\n<center><h1>500 Internal Server Error</h1></center>\r\n<hr><center>nginx/1.18.0 (Ubuntu)</center>\r\n</body>\r\n</html>\r\n",
+  "players:520": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/\",\"title\":\"Error 520: Web server is returning an unknown error\",\"status\":520,\"detail\":\"The origin web server sent a response that Cloudflare could not parse. This may indicate the ori",
+  "players:525": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-525/\",\"title\":\"Error 525: SSL handshake failed\",\"status\":525,\"detail\":\"The SSL/TLS handshake between Cloudflare and the origin server failed. The origin's SSL configuration is not compati"
+ },
+ "gapsThisRun": 0,
+ "groupsThisRun": 9001,
+ "groupMembersUpdated": 11305,
+ "profilesThisRun": 3235,
+ "callsUsed": 16200,
+ "callBudget": 16200,
+ "playersTracked": 57936,
+ "playersWithBattles": 55625,
+ "playersWithLeague": 57931,
+ "playersWithGroupData": 45079,
+ "battles": 1179354,
+ "battleTypesSeen": {
+  "ranked": 83982,
+  "homevillage": 97295
+ }
+}
