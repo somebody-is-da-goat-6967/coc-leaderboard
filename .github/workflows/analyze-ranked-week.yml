@@ -63,6 +63,7 @@ jobs:
         env:
           WEEK: ${{ inputs.week }}
           FORCE: ${{ inputs.force }}
+          SITE_DIR: src/scanner
         run: |
           ARGS="--data data --src src --week ${WEEK:-auto}"
           [ -d archive ] && ARGS="$ARGS --archive archive"
