@@ -100,9 +100,31 @@ function loadSite(srcDir) {
   const stub = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : stub()), apply: () => stub(), construct: () => stub(), set: () => true });
   const ctx = vm.createContext({ console, document: stub(), window: stub(), navigator: stub(), location: stub(), localStorage: stub(), sessionStorage: stub(), innerWidth: 1000, setTimeout, clearTimeout, URL });
   for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx, { filename: f, timeout: 10000 });
-  const api = vm.runInContext('({ canonCode, infoOf, tallyArmyStats, noteStratPlayer, ARMY_IDS, topCode })', ctx);
+  const api = vm.runInContext('({ canonCode, infoOf, tallyArmyStats, noteStratPlayer, ARMY_IDS, topCode, OPENER_PARTS, partIcon })', ctx);
   const hash = sha1(files.map(f => fs.readFileSync(f)).reduce((x, y) => Buffer.concat([x, y]), Buffer.alloc(0)));
   return { ...api, files: files.map(f => path.relative(srcDir, f)), hash };
+}
+
+// ---------- opener icons ----------
+// Same key parts and icon lookup as stats.js openerIcons(raw, code), but returns relative ClashKing asset paths
+// (the bot prefixes https://assets.clashk.ing/). `code` = the most used army code of that opener (needed for pet / revenge-equipment parts).
+const ckRel = p => String(p || '').replace(/^https?:\/\/assets\.clashk\.ing\//, '').replace(/^\/+/, '');
+function openerIconPaths(raw, code) {
+  let inf = null;
+  try { inf = code ? SITE.infoOf(code) : null; } catch { inf = null; }
+  const petOf = hero => inf?.heroes.find(h => h.name === hero)?.pet || null;
+  const out = [];
+  for (const [cat, name0] of SITE.OPENER_PARTS[raw] || []) {
+    let name = name0;
+    if (name0 === '@duke') name = petOf('Dragon Duke');
+    else if (name0 === '@queen') name = petOf('Archer Queen');
+    else if (name0 === '@rc') name = petOf('Royal Champion');
+    else if (name0 === '@revenge') name = inf?.heroes.find(h => h.name === 'Dragon Duke')?.equip.find(g => /revenge/i.test(g)) || null;
+    if (!name) continue;
+    let icon = ''; try { icon = SITE.partIcon(cat, name); } catch { /* no icon */ }
+    if (icon) out.push(ckRel(icon));
+  }
+  return out;
 }
 
 // ---------- army helpers ----------
@@ -146,7 +168,7 @@ const groupLabel = key => (key ? key.split(',').map(id => idName('troop', id)).j
 const mkG = () => ({ tracked: 0, players: 0, active: 0, att: 0, st: 0, s3: 0, pct: 0, def: 0, dz: 0, dst: 0, dur: 0, durN: 0, locked: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0] });
 const mkScope = () => ({
   G: mkG(), withCode: 0, noCode: 0, groups: new Map(), siege: new Map(),
-  noSiege: { n: 0, st: 0, s3: 0, pct: 0 }, hero: new Map(), opener: new Map(), strat: new Map(),   // hero / opener / strat are filled by the site's tallyArmyStats
+  noSiege: { n: 0, st: 0, s3: 0, pct: 0 }, leagues: new Map(), hero: new Map(), opener: new Map(), strat: new Map(),   // hero / opener / strat are filled by the site's tallyArmyStats
   duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0 })),
   comp: { troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() },
 });
@@ -295,6 +317,10 @@ function processWeek(opts, key) {
         ah: [0, 0, 0, 0], dh: [0, 0, 0, 0],
       };
       for (const t of targets) { t.G.tracked++; t.G.locked += locked; }
+      if (rec.lg && rec.lg[1]) for (const t of targets) { // players per league (current league as the crawler last saw it)
+        const e = t.leagues.get(rec.lg[1]) || t.leagues.set(rec.lg[1], { name: rec.lg[1], lid: rec.lg[0] || 0, n: 0 }).get(rec.lg[1]);
+        e.n++;
+      }
 
       const myArmy = new Map(); // code -> [uses, stars, 3stars, destruction, seconds]
       const myOpen = new Map(), myStrat = new Map(); // opener / strategy name -> [n, stars, 3stars]
@@ -377,7 +403,7 @@ function processWeek(opts, key) {
   for (const [k, t] of Object.entries(SC)) {
     const L = k === 'all' ? allPool.lists.get('all') : thPool.lists.get(+k.slice(2));
     if (!t.G.tracked) continue;
-    writeJson(path.join(statsDir, 'scopes', `${k}.json`), { schema: SCHEMA, scope: k, week, generatedAt, G: t.G, tops: L ? tops(L) : tops({}) });
+    writeJson(path.join(statsDir, 'scopes', `${k}.json`), { schema: SCHEMA, scope: k, week, generatedAt, G: t.G, leagues: [...t.leagues.values()].sort((a, b) => b.lid - a.lid || b.n - a.n), tops: L ? tops(L) : tops({}) });
     if (k !== 'all' && L) writeJson(path.join(statsDir, 'ranks', `${k}.json`), { schema: SCHEMA, scope: k, week, generatedAt, ...rankPool(L) });
 
     // armies: top by players + best 3★ rate (min players / attacks), so "best armies" lists have material too
@@ -394,7 +420,7 @@ function processWeek(opts, key) {
     const list = (m, labeler, key) => [...m].map(([id, x]) => ({ [key]: id, label: labeler(id), ...pack(x) })).sort((a, b) => b.n - a.n);
     const topFor = e => [...e.players.values()].filter(p => p.n >= MIN_STRAT_ATK).sort((a, b) => wilson(b.s3, b.n) - wilson(a.s3, a.n) || b.st / b.n - a.st / a.n || b.n - a.n)
       .slice(0, STRAT_ROWS).map(p => ({ tag: p.tag, name: p.name, n: p.n, st: p.st, s3: p.s3, pct: p.t }));
-    const named = m => [...m].map(([name, e]) => ({ name, n: e.n, st: e.st, s3: e.s3, code: SITE.topCode(e.codes) })).sort((a, b) => b.n - a.n);
+    const named = m => [...m].map(([name, e]) => { const code = SITE.topCode(e.codes); return { name, n: e.n, st: e.st, s3: e.s3, code, icons: openerIconPaths(name, code) }; }).sort((a, b) => b.n - a.n);
     writeJson(path.join(statsDir, 'armies', `${k}.json`), {
       schema: SCHEMA, scope: k, week, generatedAt, withCode: t.withCode, noCode: t.noCode, groupsTotal: all.length, minPlayersForRate: minP,
       groups: chosen.map(grp),
