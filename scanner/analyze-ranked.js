@@ -89,9 +89,12 @@ function findFile(root, name, depth = 4) {
 }
 let SITE = null;
 function loadSite(srcDir) {
-  const files = ['armyids.js', 'army.js', 'stats.js'].map(n => process.env['SITE_' + n.replace('.js', '').toUpperCase()] || findFile(process.env.SITE_DIR || srcDir, n));
-  const miss = ['armyids.js', 'army.js', 'stats.js'].filter((n, i) => !files[i]);
-  if (miss.length) throw new Error(`site files not found under ${process.env.SITE_DIR || srcDir}: ${miss.join(', ')} (set SITE_DIR to the folder that holds them)`);
+  const names = ['armyids.js', 'army.js', 'stats.js'];
+  // each file: explicit env path, then SITE_DIR, then anywhere in the checkout
+  const files = names.map(n => process.env['SITE_' + n.replace('.js', '').toUpperCase()]
+    || (process.env.SITE_DIR && findFile(process.env.SITE_DIR, n, 6)) || findFile(srcDir, n, 8));
+  const miss = names.filter((n, i) => !files[i]);
+  if (miss.length) throw new Error(`site files not found in ${srcDir}: ${miss.join(', ')}. They must be on the branch the workflow checks out (set SITE_DIR if they sit in an unusual place).`);
   const stub = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : stub()), apply: () => stub(), construct: () => stub(), set: () => true });
   const ctx = vm.createContext({ console, document: stub(), window: stub(), navigator: stub(), location: stub(), localStorage: stub(), sessionStorage: stub(), innerWidth: 1000, setTimeout, clearTimeout, URL });
   for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx, { filename: f, timeout: 10000 });
