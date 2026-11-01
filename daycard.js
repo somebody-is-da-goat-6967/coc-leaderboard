@@ -214,7 +214,7 @@ async function draw(cv, S, meta) {
     text(c, pctOf(n, G.att), rx0 + rw - 26, ry2 + 26, font(700, 22), '#fff', { align: 'right' }); });
 
   // ----- footer -----
-  text(c, `${location.host || 'Legend stats'} · icons by ClashKing`, W / 2, H - 52, font(500, 19), 'rgba(255,255,255,.4)', { align: 'center' });
+  text(c, `legendstats.pages.dev · icons by ClashKing`, W / 2, H - 52, font(500, 19), 'rgba(255,255,255,.4)', { align: 'center' });
   summary.army = F.aod ? { name: aodName, players: F.aod.players, attacks: F.aod.uses, tripleRate: F.aod.s3 / F.aod.uses, avgStars: F.aod.st / F.aod.uses, code: aodCode } : null;
   summary.mostUsed = F.pop ? { name: popName, players: F.pop.players, share: A.withCode ? F.pop.players / A.withCode : 0 } : null;
   return summary;
