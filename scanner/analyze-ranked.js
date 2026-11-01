@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 3;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths
+const SCRIPT_REV = 4;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies)
 const MIN_TH = 7, MAX_TH = 17;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -232,11 +232,12 @@ function rankPools(rows, groupFn) {
   return { ranks, lists };
 }
 
-const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln });
+const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid });
 const tops = L => ({
   attack: (L.attack || []).slice(0, TOP_N).map(topRow), stars: (L.stars || []).slice(0, TOP_N).map(topRow),
   most3: (L.most3 || []).slice(0, TOP_N).map(topRow), defense: (L.defense || []).slice(0, TOP_N).map(topRow),
   zero: (L.zero || []).slice(0, TOP_N).map(topRow), fastest: (L.fastest || []).slice(0, TOP_N).map(topRow),
+  trophies: (L.global || []).slice(0, TOP_N).map(topRow),   // top total trophies: highest league first, trophies break ties (same order as the global rank)
 });
 
 // Compact "rank pool" for one town hall: the sort keys of every QUALIFIED player, best first, so the bot can place a player
