@@ -42,14 +42,16 @@ function badge(c, s, x, y) { c.font = font(700, 17); const w = c.measureText(s).
 function facts(S, meta) {
   const { G, B, rows } = S, A = B[ALL], rk = (a, b) => tieRank(a.rank) - tieRank(b.rank);
   const pick = (arr, cmp, key) => { if (!arr.length) return null; const s = [...arr].sort(cmp), r = s[0]; return { r, tied: arr.filter((x) => key(x) === key(r)).length - 1 }; };
-  const net = pick(rows.filter((r) => r.na), (a, b) => b.net - a.net || rk(a, b), (r) => r.net);
-  const off = pick(rows.filter((r) => r.na), (a, b) => b.a - a.a || rk(a, b), (r) => r.a);
-  const wall = pick(rows.filter((r) => r.nd >= 8), (a, b) => a.d - b.d || b.dz - a.dz || rk(a, b), (r) => r.d);
-  const zero = pick(rows.filter((r) => r.dz > 0), (a, b) => b.dz - a.dz || b.nd - a.nd || a.d - b.d || rk(a, b), (r) => r.dz);
+  // a player is on the records only with a full day: 8 attacks AND 8 defenses (the fastest triple is the one record without this rule)
+  const full = rows.filter((r) => r.na >= 8 && r.nd >= 8), okTags = new Set(full.map((r) => r.tag));
+  const net = pick(full, (a, b) => b.net - a.net || rk(a, b), (r) => r.net);
+  const off = pick(full, (a, b) => a.a - b.a || rk(a, b), (r) => r.a); // lowest offense
+  const wall = pick(full, (a, b) => a.d - b.d || b.dz - a.dz || rk(a, b), (r) => r.d);
+  const zero = pick(full.filter((r) => r.dz > 0), (a, b) => b.dz - a.dz || b.nd - a.nd || a.d - b.d || rk(a, b), (r) => r.dz);
   const fast = pick(S.fast, (a, b) => a.time - b.time || rk(a, b), (r) => r.time);
-  const moved = rows.filter((r) => r.delta > 0 && Math.min(r.rank, r.prev) <= 2500);
+  const moved = full.filter((r) => r.delta > 0 && Math.min(r.rank, r.prev) <= 2500);
   const climb = pick(moved, (a, b) => b.delta - a.delta || rk(a, b), (r) => r.delta);
-  const giant = pick(S.upsets, (a, b) => (b.rank - b.oppRank) - (a.rank - a.oppRank) || rk(a, b), (r) => r.rank - r.oppRank);
+  const giant = pick(S.upsets.filter((u) => okTags.has(u.tag)), (a, b) => (b.rank - b.oppRank) - (a.rank - a.oppRank) || rk(a, b), (r) => r.rank - r.oppRank);
   // golden hour: hour of the day (UTC) with the highest 3★ rate, only hours with a fair number of attacks
   const minN = Math.max(30, G.att * 0.01); let gh = -1;
   for (let h = 0; h < 24; h++) if (G.hours[h] >= minN && (gh < 0 || G.hours3[h] / G.hours[h] > G.hours3[gh] / G.hours[gh])) gh = h;
@@ -174,7 +176,7 @@ async function draw(cv, S, meta) {
     { lab: 'MOST 0★ DEFENSES', o: F.zero, col: RED, val: (r) => r.dz + '×0★', sub: (o) => `${o.r.nd} defenses · −${o.r.d}${more(o)}` },
     { lab: 'BIGGEST CLIMBER', o: F.climb, col: LIME, val: (r) => '▲ ' + fmtN(r.delta), sub: (o) => `#${fmtN(o.r.prev)} → #${fmtN(o.r.rank)}${more(o)}` },
     { lab: 'GIANT KILLER', o: F.giant, col: '#ff9f43', val: (r) => '+' + fmtN(r.rank - r.oppRank), sub: (o) => `3★ vs ${o.r.opp} (eod #${fmtN(o.r.oppRank)})${more(o)}` },
-    { lab: 'TOP OFFENSE', o: F.off, col: GREEN, noName: true, val: (r) => '+' + fmtN(r.a), nameFn: (o) => `${fmtN(o.tied + 1)} player${o.tied ? 's' : ''}`, sub: (o) => (o.r.s3 === 8 ? 'all 8 attacks were 3★' : `${o.r.s3}×3★ out of ${o.r.na}`) },
+    { lab: 'LOWEST OFFENSE', o: F.off, col: RED, val: (r) => '+' + fmtN(r.a), sub: (o) => `${o.r.s3}×3★ out of ${o.r.na}${more(o)}` },
     { lab: 'GOLDEN HOUR', gold: true }];
   const cw = (IW - 16) / 2;
   const summary = { date: new Date(meta.start).toISOString().slice(0, 10), players: G.players, attacks: G.att, defenses: G.def, perfectDays: G.perfect, zeroStarDefenses: G.dstars[0], tripleRate: G.att ? G.astars[3] / G.att : 0, shielded: pending ? null : A.shield, records: [] };
