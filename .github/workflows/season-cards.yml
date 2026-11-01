@@ -1,0 +1,38 @@
+name: season-cards
+# Builds small per-player season stat files from season.json.gz so the Discord bot only downloads one tiny shard.
+# Runs after every crawl; does nothing (no commit) when the season file hasn't changed.
+on:
+  workflow_run:
+    workflows: [crawl-legend-board]
+    types: [completed]
+  workflow_dispatch:
+concurrency:
+  group: season-cards
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Restore previous cards (orphan 'season-cards' branch)
+        run: |
+          URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git clone --depth 1 --branch season-cards "$URL" cards-out || { mkdir cards-out; git -C cards-out init -q -b season-cards; git -C cards-out remote add origin "$URL"; }
+      - name: Build season cards
+        id: build
+        run: node scanner/seasonCards.mjs
+      - name: Publish (single-commit branch so history never grows)
+        if: steps.build.outputs.changed == 'true'
+        working-directory: cards-out
+        run: |
+          git config user.name "crawler"; git config user.email "crawler@users.noreply.github.com"
+          git checkout --orphan fresh
+          git add -A
+          git commit -q -m "season cards $(date -u +%FT%TZ)"
+          git push -f origin fresh:season-cards
