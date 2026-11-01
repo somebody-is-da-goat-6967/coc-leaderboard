@@ -51,9 +51,11 @@ jobs:
           MAX_RPS: 20                                   # this key is used by the ranked crawl only; raise if current.json shows no 429s
           NODE_OPTIONS: --max-old-space-size=4096
         run: node scanner/ranked-crawl.mjs
-      - name: Archive finished weeks (one branch per week, keeps current + previous on ranked-data)
+      - name: Archive finished weeks (one branch per week; ranked-data keeps current + previous, archive keeps the newest 2)
         continue-on-error: true
         working-directory: data-out
+        env:
+          KEEP_ARCHIVES: 2          # 2 on ranked-data + 2 archive branches = 4 weeks total
         run: |
           URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           for d in $(ls -d ranked/20* 2>/dev/null | sort | head -n -2); do
@@ -63,6 +65,11 @@ jobs:
               && git -c user.name=crawler -c user.email=crawler@users.noreply.github.com commit -q -m "ranked week $key" \
               && git push -q -f "$URL" "archive:ranked-archive-$key" ) && rm -rf "$d"
           done
+          # prune: delete archive branches older than the newest $KEEP_ARCHIVES (names end in YYYY-MM-DD, so sort = chronological)
+          git ls-remote --heads "$URL" 'refs/heads/ranked-archive-*' \
+            | awk '{print $2}' | sed 's#refs/heads/##' | sort \
+            | head -n -"$KEEP_ARCHIVES" \
+            | while read -r b; do git push -q "$URL" --delete "$b" && echo "pruned $b"; done
       - name: Publish (single-commit branch so history never grows)
         if: always()
         working-directory: data-out
