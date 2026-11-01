@@ -1,24 +1,51 @@
-// Builds small per-player season stat shards from each season's season.json.gz, so the Discord bot never has to
-// download or analyze the big file. Output (on the orphan 'season-cards' branch):
-//   <seasonStartDate>/<first 2 chars of tag>.json   { season, days, lengthDays, generatedAt, players: { TAG: {...} } }
-//   index.json                                      { keys: [...], updated }
-// Runs the current and the previous season. Skips a season whose source file hasn't changed since the last run.
+// Builds small per-player season stat shards so the Discord bot never has to download or analyze the big files.
+//
+// Inputs (all public, read over raw.githubusercontent.com):
+//   archive-s<key>/season.json.gz        season totals per player (scanner/Seasonagg.mjs)
+//   archive-s<key>/days/<date>.json.gz   one battlelog file per finished Legend Day  -> per-day offense / defense
+//   data/eod/<date>.json.gz              end-of-day leaderboard                       -> per-day rank
+//   army.js / armyids.js / season.js     the website's own code, loaded here so army + strategy names match the site
+//
+// Output (orphan 'season-cards' branch):
+//   <key>/<XX>.json         shard per first 2 chars of the tag: { season, days, dayList, generatedAt, players: { TAG: {...} } }
+//   <key>/hist/<date>.json.gz   per-day history, kept so each day is only downloaded once   { TAG: [rank, off, def, na, nd] }
+//   <key>/meta.json, index.json
+//
+// Player record:  n name, r/r0 last/first eod rank, a/d trophies, na/nd attacks/defenses, s3, dz, dy, pf, fu, st,
+//   pc  [top% net, offense, 3-star rate, avg attack, avg defense],
+//   h   per finished day: [rank, off, def, na, nd] or null,
+//   fav { s strategy, n/st/s3 attacks/stars/triples with it, atk attacks with an army link, tr [[icon, count]...], hr [[hero, icon]...] }
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import vm from 'node:vm';
 
 const REPO = process.env.GITHUB_REPOSITORY || 'somebody-is-da-goat-6967/coc-leaderboard';
 const RAW = process.env.RAW_BASE || `https://raw.githubusercontent.com/${REPO}`; // RAW_BASE only for local testing
 const OUT = process.env.OUT_DIR || 'cards-out';
 const SEASON_ANCHOR = Date.parse('2026-10-05T05:00:00Z'); // keep in sync with legend.js CONFIG and scanner/archive.mjs
 const SEASON_DAYS = 28, DAY = 864e5;
-const MIN_RATE_ATTACKS = 8; // percentiles for rates / averages need at least this many attacks (defenses)
+const MIN_RATE_ATTACKS = 8;   // percentiles for rates / averages need at least this many attacks (defenses)
+const SCHEMA = 2;             // bump to force every shard to be rebuilt
+const T0 = Date.now(), BUDGET_MS = (+process.env.TIME_BUDGET_MIN || 25) * 60000; // stop downloading new days after this; next run continues
+const CK_BASE = 'https://assets.clashk.ing/';
 
 const normTag = (t) => String(t || '').replace(/^#/, '').toUpperCase();
 const seasonKeys = (now = Date.now()) => {
   const cur = Math.floor((now - SEASON_ANCHOR) / (SEASON_DAYS * DAY));
   return [cur, cur - 1].filter((i) => i >= 0).map((i) => new Date(SEASON_ANCHOR + i * SEASON_DAYS * DAY).toISOString().slice(0, 10));
 };
+// same scale as the website (legend.js trophyGain) and scanner/Seasonagg.mjs
+function trophyGain(stars, pct) {
+  pct = Math.floor(pct || 0);
+  if (stars >= 3) return 40;
+  if (stars === 2) return Math.min(32, Math.max(16, 16 + Math.floor((pct - 50) / 3)));
+  if (stars === 1) return Math.min(15, Math.max(5, 5 + Math.floor((pct - 1) / 9)));
+  return Math.floor(pct / 10);
+}
+const gunzipMaybe = (buf) => (buf[0] === 0x1f && buf[1] === 0x8b ? zlib.gunzipSync(buf) : buf).toString('utf8');
+const readGz = (file) => { try { return JSON.parse(gunzipMaybe(fs.readFileSync(file))); } catch { return null; } };
+const writeGz = (file, data) => fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(data), { level: 9 }));
 
 async function fetchBuf(url) {
   for (let i = 0; i < 3; i++) {
@@ -34,7 +61,80 @@ async function fetchBuf(url) {
   }
 }
 
-// ---- percentiles with sorted arrays (O(n log n) instead of O(n^2)) ----
+// ---------- the website's army code (armyids.js, army.js, season.js) ----------
+function findFile(names, root = process.cwd(), depth = 4) {
+  const want = names.map((n) => n.toLowerCase());
+  const skip = new Set(['node_modules', '.git', 'cards-out', 'data-out']);
+  const walk = (dir, d) => {
+    let ents; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+    for (const n of want) for (const e of ents) if (e.isFile() && e.name.toLowerCase() === n) return path.join(dir, e.name);
+    if (d <= 0) return null;
+    for (const e of ents) if (e.isDirectory() && !skip.has(e.name) && !e.name.startsWith('.')) { const f = walk(path.join(dir, e.name), d - 1); if (f) return f; }
+    return null;
+  };
+  return walk(root, depth);
+}
+function loadSite() {
+  const files = [findFile(['armyids.js']), findFile(['army.js']), findFile(['season.js', 'stats.js'])];
+  if (files.some((f) => !f)) { console.warn('site army code not found (armyids.js / army.js / season.js); favourite army + heroes are skipped'); return null; }
+  const noop = () => {};
+  const el = () => ({ style: {}, append: noop, setAttribute: noop, classList: { toggle: noop, add: noop } });
+  const sandbox = { console, document: { addEventListener: noop, getElementById: () => null, createElement: el, body: { append: noop }, documentElement: {} },
+    location: { search: '', host: '', protocol: 'https:' }, sessionStorage: { getItem: () => null, setItem: noop }, innerWidth: 1000 };
+  sandbox.window = sandbox;
+  const ctx = vm.createContext(sandbox);
+  try {
+    for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx, { filename: f });
+    const api = vm.runInContext('({ infoOf, mainTroops, heroIconUrl, ARMY_IDS })', ctx);
+    console.log(`site army code loaded from ${files.join(', ')}`);
+    return api;
+  } catch (e) { console.warn('could not load the site army code:', e.message); return null; }
+}
+const stripBase = (u) => String(u || '').replace(CK_BASE, '');
+
+// Favourite strategy, top heroes and main troops for one player (same logic as season.js playerData).
+function favOf(p, codes, site) {
+  const strat = new Map(), hero = new Map(); let atk = 0;
+  for (const [ci, v] of Object.entries(p.arm || {})) {
+    const code = codes[+ci]; if (!code) continue;
+    let inf; try { inf = site.infoOf(code); } catch { continue; }
+    atk += v[0];
+    const name = inf.cls.strategy;
+    let s = strat.get(name); if (!s) strat.set(name, (s = { name, n: 0, st: 0, s3: 0, codes: new Map() }));
+    s.n += v[0]; s.st += v[1]; s.s3 += v[2]; s.codes.set(code, (s.codes.get(code) || 0) + v[0]);
+    for (const h of new Set(inf.heroes.map((x) => x.name))) { let x = hero.get(h); if (!x) hero.set(h, (x = { n: 0 })); x.n += v[0]; }
+  }
+  const top = [...strat.values()].sort((a, b) => b.n - a.n)[0];
+  if (!top) return null;
+  let bestCode = '', bn = -1; for (const [c, n] of top.codes) if (n > bn) { bestCode = c; bn = n; }
+  let troops = []; try { troops = site.mainTroops(bestCode, 6).map(([id, n]) => [stripBase((site.ARMY_IDS.troop[id] || [])[1]), n]); } catch { /* no icons */ }
+  const heroes = [...hero].sort((a, b) => b[1].n - a[1].n).slice(0, 4).map(([n]) => [n, stripBase(site.heroIconUrl(n))]);
+  return { s: top.name, n: top.n, st: top.st, s3: top.s3, atk, tr: troops, hr: heroes };
+}
+
+// ---------- per-day history (each finished day is downloaded once, then kept in <key>/hist) ----------
+async function buildDayHist(key, date) {
+  const dayBuf = await fetchBuf(`${RAW}/archive-s${key}/days/${date}.json.gz`);
+  if (!dayBuf) { console.warn(`  day ${date}: no day file`); return {}; }
+  const day = JSON.parse(gunzipMaybe(dayBuf));
+  let ranks = null;
+  try {
+    const eb = await fetchBuf(`${RAW}/data/eod/${date}.json.gz`);
+    if (eb) ranks = new Map(((JSON.parse(gunzipMaybe(eb)).players) || []).map((p, i) => [normTag(p.tag), p.rank || i + 1]));
+  } catch (e) { console.warn(`  day ${date}: eod ranks unavailable (${e.message})`); }
+  if (!ranks) console.warn(`  day ${date}: no end-of-day ranks, rank chart will have a gap`);
+  const ts = (r) => Date.parse(r.time), out = {};
+  for (const [rawTag, e] of Object.entries(day.players || {})) {
+    const at = [...(e.attacks || [])].sort((a, b) => ts(a) - ts(b)).slice(0, 8);
+    const df = [...(e.defenses || [])].sort((a, b) => ts(a) - ts(b)).slice(0, 8);
+    if (!at.length && !df.length) continue;
+    const tag = normTag(rawTag);
+    out[tag] = [(ranks && ranks.get(tag)) || 0, at.reduce((s, h) => s + trophyGain(h.stars, h.destruction), 0), df.reduce((s, h) => s + trophyGain(h.stars, h.destruction), 0), at.length, df.length];
+  }
+  return out;
+}
+
+// ---------- percentiles with sorted arrays ----------
 const lowerBound = (a, v) => { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < v) lo = m + 1; else hi = m; } return lo; };
 const upperBound = (a, v) => { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] <= v) lo = m + 1; else hi = m; } return lo; };
 function pctile(sorted) { // "Top X%": share of players doing better than `mine`
@@ -47,7 +147,7 @@ function pctile(sorted) { // "Top X%": share of players doing better than `mine`
 }
 const sortedOf = (rows, val, ok = () => true) => rows.filter(ok).map(val).filter(Number.isFinite).sort((a, b) => a - b);
 
-function buildShards(agg) {
+function buildShards(agg, hists, site) {
   const entries = Object.entries(agg.players || {}).filter(([, p]) => p.na || p.nd);
   const rows = entries.map(([, p]) => p);
   const pNet = pctile(sortedOf(rows, (x) => x.a - x.d));
@@ -58,21 +158,13 @@ function buildShards(agg) {
   const shards = new Map();
   for (const [rawTag, p] of entries) {
     const tag = normTag(rawTag);
-    // most-used army of the season (raw army link) so the bot can show it later; stays small
-    let best = null, bci = -1;
-    for (const [ci, v] of Object.entries(p.arm || {})) if (!best || v[0] > best[0] || (v[0] === best[0] && v[1] > best[1])) { best = v; bci = +ci; }
-    const code = best && agg.codes ? agg.codes[bci] : null;
     const rec = {
       n: p.n || 'Unknown', r: p.r || 0, r0: p.r0 || 0,
       a: p.a, d: p.d, na: p.na, nd: p.nd, s3: p.s3, dz: p.dz || 0, dy: p.dy || 0, pf: p.pf || 0, fu: p.fu || 0, st: p.st || 0,
-      pc: [
-        pNet(p.a - p.d),
-        pOff(p.a),
-        p.na >= MIN_RATE_ATTACKS ? pRate(p.s3 / p.na) : null,
-        p.na >= MIN_RATE_ATTACKS ? pAvgA(p.a / p.na) : null,
-        p.nd >= MIN_RATE_ATTACKS ? pAvgD(p.d / p.nd, false) : null,
-      ], // top-% for: net, offense, 3-star rate, avg attack, avg defense (lower is better)
-      fav: code ? [code, best[0], best[1], best[2]] : null, // [army link, attacks, stars, triples]
+      pc: [pNet(p.a - p.d), pOff(p.a), p.na >= MIN_RATE_ATTACKS ? pRate(p.s3 / p.na) : null, p.na >= MIN_RATE_ATTACKS ? pAvgA(p.a / p.na) : null,
+        p.nd >= MIN_RATE_ATTACKS ? pAvgD(p.d / p.nd, false) : null],
+      h: hists.map((h) => (h && h[tag]) || null),
+      fav: site ? favOf(p, agg.codes || [], site) : null,
     };
     const key = tag.slice(0, 2).padEnd(2, '_');
     if (!shards.has(key)) shards.set(key, {});
@@ -81,31 +173,42 @@ function buildShards(agg) {
   return { shards, count: entries.length };
 }
 
-const sigOf = (agg) => `${agg.generatedAt ?? ''}|${(agg.days || []).length}|${Object.keys(agg.players || {}).length}`;
-
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  const keys = seasonKeys(), built = [];
+  const keys = seasonKeys(), built = [], site = loadSite();
   let changed = false;
   for (const key of keys) {
-    const dir = path.join(OUT, key), metaFile = path.join(dir, 'meta.json');
+    const dir = path.join(OUT, key), histDir = path.join(dir, 'hist'), metaFile = path.join(dir, 'meta.json');
     const buf = await fetchBuf(`${RAW}/archive-s${key}/season.json.gz`);
     if (!buf) { console.log(`season ${key}: no season.json.gz yet, skipping`); continue; }
-    const agg = JSON.parse((buf[0] === 0x1f && buf[1] === 0x8b ? zlib.gunzipSync(buf) : buf).toString('utf8'));
-    const sig = sigOf(agg);
-    let old = null; try { old = JSON.parse(fs.readFileSync(metaFile, 'utf8')); } catch { /* first run */ }
+    const agg = JSON.parse(gunzipMaybe(buf)), days = [...(agg.days || [])].sort();
     built.push(key);
-    if (old && old.sig === sig) { console.log(`season ${key}: unchanged (${sig})`); continue; }
-    const { shards, count } = buildShards(agg);
-    fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
-    const head = { season: agg.season, days: (agg.days || []).length, lengthDays: agg.lengthDays || SEASON_DAYS, generatedAt: agg.generatedAt || null, players: undefined };
+    fs.mkdirSync(histDir, { recursive: true });
+
+    // download the days we don't have yet (oldest first), within the time budget
+    let fetched = 0;
+    for (const date of days) {
+      const f = path.join(histDir, `${date}.json.gz`);
+      if (fs.existsSync(f)) continue;
+      if (Date.now() - T0 > BUDGET_MS) { console.log(`season ${key}: time budget used, remaining days continue next run`); break; }
+      const t = Date.now(); writeGz(f, await buildDayHist(key, date)); fetched++;
+      console.log(`  day ${date}: history built in ${((Date.now() - t) / 1000).toFixed(1)}s`);
+    }
+    const histDays = days.filter((d) => fs.existsSync(path.join(histDir, `${d}.json.gz`)));
+    const sig = `${SCHEMA}|${site ? 'a' : 'n'}|${agg.generatedAt ?? ''}|${days.length}|${Object.keys(agg.players || {}).length}|${histDays.length}`;
+    let old = null; try { old = JSON.parse(fs.readFileSync(metaFile, 'utf8')); } catch { /* first run */ }
+    if (old && old.sig === sig && !fetched) { console.log(`season ${key}: unchanged (${sig})`); continue; }
+
+    const hists = days.map((d) => (histDays.includes(d) ? readGz(path.join(histDir, `${d}.json.gz`)) : null));
+    const { shards, count } = buildShards(agg, hists, site);
+    for (const f of fs.readdirSync(dir)) if (/^[0-9A-Z_]{2}\.json$/.test(f)) fs.rmSync(path.join(dir, f)); // old shards only; keep hist/
+    const head = { season: agg.season, days: days.length, dayList: days, lengthDays: agg.lengthDays || SEASON_DAYS, generatedAt: agg.generatedAt || null };
     for (const [k, players] of shards) fs.writeFileSync(path.join(dir, `${k}.json`), JSON.stringify({ ...head, players }));
-    fs.writeFileSync(metaFile, JSON.stringify({ sig, season: agg.season, days: head.days, lengthDays: head.lengthDays, generatedAt: head.generatedAt, players: count, shards: shards.size, built: new Date().toISOString() }));
-    console.log(`season ${key}: ${count} players in ${shards.size} shards`);
+    fs.writeFileSync(metaFile, JSON.stringify({ sig, season: agg.season, days: days.length, histDays: histDays.length, lengthDays: head.lengthDays, generatedAt: head.generatedAt, players: count, shards: shards.size, built: new Date().toISOString() }));
+    console.log(`season ${key}: ${count} players in ${shards.size} shards (${histDays.length}/${days.length} days of history)`);
     changed = true;
   }
-  // drop seasons that are no longer current/previous
-  for (const d of fs.readdirSync(OUT)) {
+  for (const d of fs.readdirSync(OUT)) { // drop seasons that are no longer current/previous
     if (/^\d{4}-\d\d-\d\d$/.test(d) && !keys.includes(d)) { fs.rmSync(path.join(OUT, d), { recursive: true, force: true }); changed = true; console.log(`removed old season ${d}`); }
   }
   if (changed) fs.writeFileSync(path.join(OUT, 'index.json'), JSON.stringify({ keys: built, updated: new Date().toISOString() }));
