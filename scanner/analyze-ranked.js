@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 4;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies)
+const SCRIPT_REV = 5;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks)
 const MIN_TH = 7, MAX_TH = 17;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -60,6 +60,11 @@ const cleanName = (s, fb) => String(s ?? '').replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cn}\
 const dateKey = ms => new Date(ms).toISOString().slice(0, 10);
 const r1 = v => Math.round(v * 10) / 10;
 const sha1 = buf => crypto.createHash('sha1').update(buf).digest('hex');
+
+// Ranked trophies per battle (game rules). Attacker: 3★ = 40; 2★ = 16 + 1 per 3% above 50 (max 32); 1★ = 5 + 1 per 9% above 1 (max 15);
+// 0★ = 1 per 10% (none under 10%). Defender: 40 minus what the attacker got, 0 after a 3★, the full 40 after a 0★.
+const atkTrophies = (stars, pct) => { const p = Math.max(0, +pct || 0); return stars >= 3 ? 40 : stars === 2 ? 16 + Math.min(16, Math.floor(Math.max(0, p - 50) / 3)) : stars === 1 ? 5 + Math.min(10, Math.floor(Math.max(0, p - 1) / 9)) : Math.min(4, Math.floor(p / 10)); };
+const defTrophies = (stars, pct) => (stars >= 3 ? 0 : stars <= 0 ? 40 : 40 - atkTrophies(stars, pct));
 
 function wilson(k, n) { // lower bound of the 95% Wilson interval: a 3-star rate that accounts for sample size
   if (!n) return 0;
@@ -195,6 +200,8 @@ const METRICS = {
   most3:   { has: r => r.na > 0, qual: r => r.na > 0, cmp: (a, b) => b.s3 - a.s3 || b.na - a.na },
   defense: { has: r => r.nd > 0, qual: r => r.nd >= MIN_DEF, cmp: (a, b) => a.dst / a.nd - b.dst / b.nd || b.nd - a.nd },
   zero:    { has: r => r.nd > 0, qual: r => r.nd > 0, cmp: (a, b) => b.dz - a.dz || b.nd - a.nd },
+  offtr:   { has: r => r.na > 0, qual: r => r.na > 0, cmp: (a, b) => b.ot - a.ot || b.na - a.na },   // trophies won attacking
+  deftr:   { has: r => r.nd > 0, qual: r => r.nd > 0, cmp: (a, b) => b.dt - a.dt || b.nd - a.nd },   // trophies won defending
   fastest: { has: r => r.fast != null, qual: r => r.fast != null, cmp: (a, b) => a.fast - b.fast },
 };
 const tieCmp = (a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0);
@@ -232,11 +239,12 @@ function rankPools(rows, groupFn) {
   return { ranks, lists };
 }
 
-const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid });
+const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid, ot: r.ot, dt: r.dt });
 const tops = L => ({
   attack: (L.attack || []).slice(0, TOP_N).map(topRow), stars: (L.stars || []).slice(0, TOP_N).map(topRow),
   most3: (L.most3 || []).slice(0, TOP_N).map(topRow), defense: (L.defense || []).slice(0, TOP_N).map(topRow),
   zero: (L.zero || []).slice(0, TOP_N).map(topRow), fastest: (L.fastest || []).slice(0, TOP_N).map(topRow),
+  offtr: (L.offtr || []).slice(0, TOP_N).map(topRow), deftr: (L.deftr || []).slice(0, TOP_N).map(topRow),
   trophies: (L.global || []).slice(0, TOP_N).map(topRow),   // top total trophies: highest league first, trophies break ties (same order as the global rank)
 });
 
@@ -244,6 +252,7 @@ const tops = L => ({
 // who is not in the data yet (or whose numbers just changed) by binary search without downloading anybody else's record.
 // Entries are [primary, secondary] in exactly the order METRICS sorts them (see townhallStats.js, which mirrors it):
 //   global [leagueId, trophies] | attack [wilson 3★ rate, attacks] | stars [stars/attack, attacks] | most3 [3★ count, attacks]
+//   offtr [attack trophies, attacks] | deftr [defense trophies, defenses]
 //   defense [stars conceded/defense, defenses] | zero [0★ defenses, defenses] | league { leagueId: [trophies, ...] } (trophies, best first)
 const r6 = v => Math.round(v * 1e6) / 1e6;
 function rankPool(L) {
@@ -258,6 +267,8 @@ function rankPool(L) {
     most3: (L.most3 || []).map(r => [r.s3, r.na]),
     defense: (L.defense || []).map(r => [r6(r.dst / r.nd), r.nd]),
     zero: (L.zero || []).map(r => [r.dz, r.nd]),
+    offtr: (L.offtr || []).map(r => [r.ot, r.na]),
+    deftr: (L.deftr || []).map(r => [r.dt, r.nd]),
   };
 }
 
@@ -314,7 +325,7 @@ function processWeek(opts, key) {
         tag, name: cleanName(rec.n, tag), th: pth,
         lid: rec.lg ? rec.lg[0] || 0 : 0, ln: rec.lg ? rec.lg[1] || 'Unranked' : null, hasLg: !!rec.lg, tr: rec.tr || 0,
         mx, ga: rec.gw ? rec.gw[0] + rec.gw[1] : null,
-        na: att.length, nd: def.length, st: 0, s3: 0, pct: 0, dz: 0, dst: 0, d3: 0, dur: 0, durN: 0, fast: null,
+        na: att.length, nd: def.length, st: 0, s3: 0, pct: 0, dz: 0, dst: 0, d3: 0, ot: 0, dt: 0, dur: 0, durN: 0, fast: null,
         ah: [0, 0, 0, 0], dh: [0, 0, 0, 0],
       };
       for (const t of targets) { t.G.tracked++; t.G.locked += locked; }
@@ -327,7 +338,7 @@ function processWeek(opts, key) {
       const myOpen = new Map(), myStrat = new Map(); // opener / strategy name -> [n, stars, 3stars]
       for (const h of att) {
         const s3 = h.stars === 3 ? 1 : 0;
-        row.st += h.stars; row.s3 += s3; row.pct += h.pct; row.ah[h.stars]++;
+        row.st += h.stars; row.s3 += s3; row.pct += h.pct; row.ah[h.stars]++; row.ot += atkTrophies(h.stars, h.pct);
         if (h.time > 0) { row.dur += h.time; row.durN++; if (s3 && (row.fast == null || h.time < row.fast)) row.fast = h.time; }
         for (const t of targets) {
           const G = t.G;
@@ -353,7 +364,7 @@ function processWeek(opts, key) {
         for (const [m, k] of [[myOpen, inf.cls.openerRaw], [myStrat, inf.cls.strategy]]) { const o = m.get(k) || m.set(k, [0, 0, 0]).get(k); o[0]++; o[1] += h.stars; o[2] += s3; }
       }
       for (const h of def) {
-        row.dst += h.stars; row.dh[h.stars]++; if (h.stars === 0) row.dz++; if (h.stars === 3) row.d3++;
+        row.dst += h.stars; row.dt += defTrophies(h.stars, h.pct); row.dh[h.stars]++; if (h.stars === 0) row.dz++; if (h.stars === 3) row.d3++;
         for (const t of targets) { t.G.def++; t.G.dst += h.stars; t.G.dstars[h.stars]++; if (h.stars === 0) t.G.dz++; }
       }
       if (row.na || row.nd) for (const t of targets) t.G.players++;
