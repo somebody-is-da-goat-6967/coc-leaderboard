@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legend Day recap</title>
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="manifest" href="site.webmanifest">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;800&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.wrap.dc{max-width:760px}
+.dc .controls{align-items:stretch}.dc .controls select{flex:1 1 220px;min-width:0}
+.dc .stage{position:relative;margin:6px auto 14px;max-width:640px;min-height:240px}
+.dc canvas{display:block;width:100%;height:auto;border-radius:18px;box-shadow:0 18px 50px -18px rgba(20,10,60,.7)}
+.dc .acts{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:0 0 10px}
+.dc .acts .btn.main{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.dc .acts .btn:disabled{opacity:.45;cursor:default}
+.dc .note{text-align:center;color:var(--muted);font-size:14px;margin:6px 0}
+.dc .note a{color:var(--accent)}
+body.render{background:#0a0822}body.render .wrap{padding:0;max-width:none}body.render .stage{max-width:none;margin:0}body.render canvas{border-radius:0;box-shadow:none;width:auto}
+body.render h1,body.render .sub,body.render nav,body.render .controls,body.render .acts,body.render .note,body.render footer{display:none}
+</style>
+</head><body><div class="wrap dc">
+  <h1>Legend Day recap</h1>
+  <p class="sub">One shareable image per Legend Day: army of the day, fastest triple, perfect days, 0★ defenses, biggest net gain and more.</p>
+  <nav><a href="./">Leaderboard</a><a href="player.html">Player search</a><a href="stats.html">Stats</a><a href="season.html">Season</a><a href="townhall.html">Town Hall</a><a href="daily.html" aria-current="page">Daily</a></nav>
+  <div class="controls">
+    <button class="btn" id="prev" aria-label="Previous day">‹</button>
+    <select id="dsel" aria-label="Legend Day"></select>
+    <button class="btn" id="next" aria-label="Next day">›</button>
+  </div>
+  <div class="stage"><div class="msg" id="status">Loading…</div><canvas id="card" hidden></canvas></div>
+  <div class="acts">
+    <button class="btn main" id="dl" disabled>⬇ Download image</button>
+    <button class="btn" id="copy" disabled>Copy image</button>
+    <button class="btn" id="share" disabled>Share</button>
+    <button class="btn" id="link">Copy page link</button>
+  </div>
+  <p class="note" id="raw"></p>
+  <footer id="foot">Computed in your browser from the crawler’s battle logs · icons by <a href="https://assets.clashk.ing" target="_blank" rel="noopener">ClashKing</a></footer>
+</div>
+<script src="armyids.js"></script>
+<script src="army.js"></script>
+<script src="legend.js"></script>
+<script src="stats.js"></script>
+<script src="daycard.js"></script>
+<script>
+(function () {
+  const qs = new URLSearchParams(location.search), RENDER = qs.has('render');
+  if (qs.get('data')) CONFIG.DATA_URL = qs.get('data'); // render job: read the data branch checkout next to the site instead of GitHub raw
+  if (RENDER) document.body.classList.add('render');
+  const sel = $('dsel'), cv = $('card'), status = $('status'), md = (d) => new Date(d + 'T05:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  let dates = [], cur = '', loadTok = 0, blob = null;
+  const setStatus = (t) => { status.hidden = !t; status.textContent = t || ''; };
+  const cardBlob = () => new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error('empty image'))), 'image/png'));
+  const fname = () => `legend-day-${cur === 'live' ? 'live' : cur}.png`;
+  function acts(on) { for (const id of ['dl', 'copy', 'share']) $(id).disabled = !on; }
+  function nav() { const i = sel.selectedIndex; $('prev').disabled = i >= sel.options.length - 1; $('next').disabled = i <= 0; }
+  function rawNote() {
+    const base = `${CONFIG.REPO_RAW}/daily-cards`;
+    $('raw').innerHTML = cur && cur !== 'live' ? `Pre-rendered PNG (made automatically after each reset): <a href="${esc(base)}/${esc(cur)}.png" target="_blank" rel="noopener">${esc(cur)}.png</a> · <a href="${esc(base)}/latest.png" target="_blank" rel="noopener">latest.png</a>` : 'Today’s card is a preview: it changes until the Legend Day ends at 05:00 UTC.';
+  }
+  async function load(value) {
+    const tok = ++loadTok; cur = value; acts(false); cv.hidden = true; window.__card = { ready: false }; setStatus('Crunching the battle logs…'); nav(); rawNote();
+    try {
+      const idx = await getIndex(), back = value === 'live' ? 0 : Math.round((Date.parse(idx.live.dayStart) - Date.parse(value + 'T05:00:00Z')) / CONFIG.DAY) + 1;
+      const dd = await getDayData(back); if (tok !== loadTok) return;
+      const eod = await getEodInfo(dd.start).catch(() => null); if (tok !== loadTok) return;
+      let prev = null; try { const ds = (await getMeta()).endOfDayDates || [], i = eod ? ds.indexOf(eod.date) : -1; if (i > 0) prev = await eodRanks(ds[i - 1]); } catch { /* optional */ }
+      const S = await computeStats(dd, eod && eod.ranks, prev, (f) => { if (tok === loadTok) setStatus(`Crunching the battle logs… ${Math.round(f * 100)}%`); }, () => tok !== loadTok);
+      if (!S || tok !== loadTok) return;
+      if (!S.G.players) { setStatus('No battle data for this day.'); window.__card = { ready: true, empty: true }; return; }
+      setStatus('Drawing the card…');
+      const summary = await DayCard.draw(cv, S, { start: dd.start, end: dd.end, eodDate: eod && eod.date }); if (tok !== loadTok) return;
+      cv.hidden = false; setStatus(''); acts(true); blob = null;
+      history.replaceState(null, '', value === 'live' ? '?live' : `?date=${value}`);
+      window.__card = { ready: true, summary };
+    } catch (e) { if (tok === loadTok) { setStatus('Couldn’t build the card: ' + e.message); window.__card = { ready: true, error: e.message }; } }
+  }
+  $('dl').onclick = async () => { const b = await cardBlob(), a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = fname(); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+  $('copy').onclick = async () => { const t = $('copy').textContent; try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob() })]); $('copy').textContent = 'Copied ✓'; } catch { $('copy').textContent = 'Copy not supported here'; } setTimeout(() => { $('copy').textContent = t; }, 1800); };
+  $('share').onclick = async () => { try { const f = new File([await cardBlob()], fname(), { type: 'image/png' }); if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: 'Legend Day recap' }); else $('dl').click(); } catch { /* cancelled */ } };
+  $('link').onclick = async () => { const t = $('link').textContent; try { await navigator.clipboard.writeText(location.href); $('link').textContent = 'Copied ✓'; } catch { $('link').textContent = location.href; } setTimeout(() => { $('link').textContent = t; }, 1800); };
+  sel.onchange = () => load(sel.value);
+  $('prev').onclick = () => { if (sel.selectedIndex < sel.options.length - 1) { sel.selectedIndex++; load(sel.value); } };
+  $('next').onclick = () => { if (sel.selectedIndex > 0) { sel.selectedIndex--; load(sel.value); } };
+  (async () => {
+    try { dates = ((await getIndex()).archives || []).map((a) => a.date).sort().reverse(); } catch { dates = []; }
+    sel.innerHTML = dates.map((d) => `<option value="${d}">Day ended ${md(d)} 05:00 UTC</option>`).join('') + '<option value="live">Today so far (preview)</option>';
+    const want = qs.has('live') ? 'live' : qs.get('date'), start = want && [...sel.options].some((o) => o.value === want) ? want : dates[0] || 'live';
+    sel.value = start; load(start);
+  })();
+})();
+</script>
+</body></html>
