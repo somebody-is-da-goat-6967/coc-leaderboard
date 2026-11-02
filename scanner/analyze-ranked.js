@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 5;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks)
+const SCRIPT_REV = 6;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks
 const MIN_TH = 7, MAX_TH = 17;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -320,6 +320,11 @@ function processWeek(opts, key) {
       const mx = rec.lg ? maxAttacks(rec.lg[1]) : DEFAULT_MAX_ATK;
       att.sort((x, y) => x.ts - y.ts || y.ix - x.ix);
       if (att.length > mx) att.splice(0, att.length - mx);
+      // defenses get the same cap: a week never holds more than the league's maximum, nor more than the game says the player took
+      // (rec.gw = [attack wins, attack losses, defense wins, defense losses]). Older logged battles are dropped, oldest first.
+      const gwDef = rec.gw ? (+rec.gw[2] || 0) + (+rec.gw[3] || 0) : 0, mxD = gwDef > 0 ? Math.min(mx, gwDef) : mx;
+      def.sort((x, y) => x.ts - y.ts || y.ix - x.ix);
+      if (def.length > mxD) def.splice(0, def.length - mxD);
 
       const row = {
         tag, name: cleanName(rec.n, tag), th: pth,
