@@ -28,7 +28,7 @@ jobs:
       - name: Crawl
         env:
           COC_API_KEY: ${{ secrets.COC_API_KEY }}
-          MODE: refresh
+          MODE: ${{ inputs.mode || 'refresh' }}   # scheduled runs stay 'refresh'; manual runs honor the dispatch input
         run: node scanner/crawl.mjs
       - name: Battlelogs (live + daily 05:00 UTC copy)
         continue-on-error: true   # never block publishing the leaderboard
