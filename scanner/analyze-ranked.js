@@ -25,11 +25,13 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 6;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks
+const SCRIPT_REV = 7;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail
 const MIN_TH = 7, MAX_TH = 17;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
+// A ranked week starts every Monday 17:00 UTC (= 9:00 PST), exactly like ranked-crawl.mjs (same env names, same defaults).
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const START_DOW = Number(process.env.WEEK_START_DOW ?? 1), START_HOUR = Number(process.env.WEEK_START_HOUR ?? 17);
 const TOP_N = 10;                          // rows in each top list
 const MAX_GROUPS = 100, MAX_BEST_GROUPS = 40, MAX_VARIANTS = 10;
 const PLAYER_ARMIES = 3, PLAYER_OPENERS = 3;
@@ -58,6 +60,20 @@ function parseArgs(argv) {
 const normTag = t => { const s = String(t ?? '').trim().toUpperCase(); return s.startsWith('#') ? s : `#${s}`; };
 const cleanName = (s, fb) => String(s ?? '').replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}]/gu, '').replace(/\s+/g, ' ').trim() || fb;
 const dateKey = ms => new Date(ms).toISOString().slice(0, 10);
+
+// ---------- week boundaries (same rule as the crawler: Monday 17:00 UTC) ----------
+function weekStartAt(ms) { // the most recent reset at or before ms
+  const now = new Date(ms);
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), START_HOUR));
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - START_DOW + 7) % 7));
+  if (d > now) d.setUTCDate(d.getUTCDate() - 7);
+  return d.getTime();
+}
+const weekKeyOf = startMs => new Date(startMs).toISOString().slice(0, 10);
+function weekBounds(key) {
+  const start = Date.parse(`${key}T${String(START_HOUR).padStart(2, '0')}:00:00Z`);
+  return { start, end: start + WEEK_MS };
+}
 const r1 = v => Math.round(v * 10) / 10;
 const sha1 = buf => crypto.createHash('sha1').update(buf).digest('hex');
 
@@ -170,7 +186,7 @@ const idName = (cat, id) => (SITE.ARMY_IDS[cat][id] || [`#${id}`])[0];
 const groupLabel = key => (key ? key.split(',').map(id => idName('troop', id)).join(' + ') : 'No troops');
 
 // ---------- accumulators ----------
-const mkG = () => ({ tracked: 0, players: 0, active: 0, att: 0, st: 0, s3: 0, pct: 0, def: 0, dz: 0, dst: 0, dur: 0, durN: 0, locked: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0] });
+const mkG = () => ({ tracked: 0, players: 0, active: 0, attGame: 0, defGame: 0, att: 0, st: 0, s3: 0, pct: 0, def: 0, dz: 0, dst: 0, dur: 0, durN: 0, locked: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0] });
 const mkScope = () => ({
   G: mkG(), withCode: 0, noCode: 0, groups: new Map(), siege: new Map(),
   noSiege: { n: 0, st: 0, s3: 0, pct: 0 }, leagues: new Map(), hero: new Map(), opener: new Map(), strat: new Map(),   // hero / opener / strat are filled by the site's tallyArmyStats
@@ -182,12 +198,9 @@ const cnt = (m, k, st, s3, pc) => { let c = m.get(k); if (!c) m.set(k, (c = { n:
 // ---------- week handling ----------
 function weekList(dataDir, which) {
   if (which && which !== 'auto') return [which];
-  let start = null;
-  try { start = Date.parse(JSON.parse(fs.readFileSync(path.join(dataDir, 'ranked', 'current.json'), 'utf8')).start); } catch { /* fall through */ }
-  if (!Number.isFinite(start)) { const anchor = 1791781200 * 1000, now = Date.now(); start = anchor + Math.floor((now - anchor) / WEEK_MS) * WEEK_MS; }
-  return [dateKey(start), dateKey(start - WEEK_MS)];
+  const start = weekStartAt(Date.now());
+  return [weekKeyOf(start), weekKeyOf(weekStartAt(start - 1))];   // current + previous week
 }
-function readCurrent(dataDir) { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'ranked', 'current.json'), 'utf8')); } catch { return null; } }
 
 // ---------- ranking ----------
 // Every metric: has = player has the data at all, qual = enough games to be ranked "officially", cmp = better first.
@@ -195,13 +208,13 @@ function readCurrent(dataDir) { try { return JSON.parse(fs.readFileSync(path.joi
 const METRICS = {
   global:  { has: r => r.hasLg, qual: r => r.hasLg, cmp: (a, b) => b.lid - a.lid || b.tr - a.tr },
   league:  { has: r => r.hasLg, qual: r => r.hasLg, cmp: (a, b) => b.tr - a.tr, sub: r => r.lid },
-  attack:  { has: r => r.na > 0, qual: r => r.na >= MIN_ATK, cmp: (a, b) => b.w3 - a.w3 || b.na - a.na },
-  stars:   { has: r => r.na > 0, qual: r => r.na >= MIN_ATK, cmp: (a, b) => b.st / b.na - a.st / a.na || b.na - a.na },
-  most3:   { has: r => r.na > 0, qual: r => r.na > 0, cmp: (a, b) => b.s3 - a.s3 || b.na - a.na },
-  defense: { has: r => r.nd > 0, qual: r => r.nd >= MIN_DEF, cmp: (a, b) => a.dst / a.nd - b.dst / b.nd || b.nd - a.nd },
-  zero:    { has: r => r.nd > 0, qual: r => r.nd > 0, cmp: (a, b) => b.dz - a.dz || b.nd - a.nd },
-  offtr:   { has: r => r.na > 0, qual: r => r.na > 0, cmp: (a, b) => b.ot - a.ot || b.na - a.na },   // trophies won attacking
-  deftr:   { has: r => r.nd > 0, qual: r => r.nd > 0, cmp: (a, b) => b.dt - a.dt || b.nd - a.nd },   // trophies won defending
+  attack:  { has: r => r.la > 0, qual: r => r.na >= MIN_ATK && r.la > 0, cmp: (a, b) => b.w3 - a.w3 || b.na - a.na },
+  stars:   { has: r => r.la > 0, qual: r => r.na >= MIN_ATK && r.la > 0, cmp: (a, b) => b.st / b.la - a.st / a.la || b.na - a.na },
+  most3:   { has: r => r.la > 0, qual: r => r.la > 0, cmp: (a, b) => b.s3 - a.s3 || b.na - a.na },
+  defense: { has: r => r.ld > 0, qual: r => r.nd >= MIN_DEF && r.ld > 0, cmp: (a, b) => a.dst / a.ld - b.dst / b.ld || b.nd - a.nd },
+  zero:    { has: r => r.ld > 0, qual: r => r.ld > 0, cmp: (a, b) => b.dz - a.dz || b.nd - a.nd },
+  offtr:   { has: r => r.la > 0, qual: r => r.la > 0, cmp: (a, b) => b.ot - a.ot || b.na - a.na },   // trophies won attacking
+  deftr:   { has: r => r.ld > 0, qual: r => r.ld > 0, cmp: (a, b) => b.dt - a.dt || b.nd - a.nd },   // trophies won defending
   fastest: { has: r => r.fast != null, qual: r => r.fast != null, cmp: (a, b) => a.fast - b.fast },
 };
 const tieCmp = (a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0);
@@ -239,7 +252,7 @@ function rankPools(rows, groupFn) {
   return { ranks, lists };
 }
 
-const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid, ot: r.ot, dt: r.dt });
+const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, la: r.la, ld: r.ld, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid, ot: r.ot, dt: r.dt });
 const tops = L => ({
   attack: (L.attack || []).slice(0, TOP_N).map(topRow), stars: (L.stars || []).slice(0, TOP_N).map(topRow),
   most3: (L.most3 || []).slice(0, TOP_N).map(topRow), defense: (L.defense || []).slice(0, TOP_N).map(topRow),
@@ -263,9 +276,9 @@ function rankPool(L) {
     global: (L.global || []).map(r => [r.lid, r.tr]),
     league,
     attack: (L.attack || []).map(r => [r6(r.w3), r.na]),
-    stars: (L.stars || []).map(r => [r6(r.st / r.na), r.na]),
+    stars: (L.stars || []).map(r => [r6(r.st / r.la), r.na]),
     most3: (L.most3 || []).map(r => [r.s3, r.na]),
-    defense: (L.defense || []).map(r => [r6(r.dst / r.nd), r.nd]),
+    defense: (L.defense || []).map(r => [r6(r.dst / r.ld), r.nd]),
     zero: (L.zero || []).map(r => [r.dz, r.nd]),
     offtr: (L.offtr || []).map(r => [r.ot, r.na]),
     deftr: (L.deftr || []).map(r => [r.dt, r.nd]),
@@ -291,9 +304,8 @@ function processWeek(opts, key) {
     if (!opts.force && old.inputHash === inputHash) { console.log(`[analyze] ${key}: inputs unchanged, skipping`); return { key, skipped: true }; }
   } catch { /* no previous stats */ }
 
-  const cur = readCurrent(opts.data);
-  const start = cur && dateKey(Date.parse(cur.start)) === key ? Date.parse(cur.start) : Date.parse(key + 'T05:00:00Z');
-  const week = { key, start, end: cur && dateKey(Date.parse(cur.start)) === key ? Date.parse(cur.end) : start + WEEK_MS };
+  const { start, end } = weekBounds(key);
+  const week = { key, start, end };
 
   const SC = { all: mkScope() };
   for (let t = MIN_TH; t <= MAX_TH; t++) SC['th' + t] = mkScope();
@@ -309,31 +321,34 @@ function processWeek(opts, key) {
       const pth = rec.th || th;
       const targets = [SC.all]; if (pth >= MIN_TH && pth <= MAX_TH) targets.push(SC['th' + pth]);
 
+      // Attack / defense COUNTS come from the league group (rec.gw = [attack wins, attack losses, defense wins, defense losses], reset by the game
+      // every week). Battle logs never add to them: they only supply stars / % / army for battles inside THIS week, up to that count.
+      const gw = Array.isArray(rec.gw) ? rec.gw.map(v => +v || 0) : null;
+      const mx = rec.lg ? maxAttacks(rec.lg[1]) : DEFAULT_MAX_ATK;
+      const nAtk = gw ? Math.min(mx, gw[0] + gw[1]) : 0, nDef = gw ? Math.min(mx, gw[2] + gw[3]) : 0;
       const att = [], def = [];
       let ix = 0;
       for (const r of rec.b || []) {
-        const h = { ix: ix++, ts: r[0] || r[7] || 0, stars: Math.max(0, Math.min(3, r[2] || 0)), pct: r[3] || 0, time: r[8] || 0, code: r[5] || '' };
+        let ts = r[0] || 0; if (ts > 0 && ts < 1e11) ts *= 1000;   // seconds -> ms
+        if (!(ts >= start && ts < end)) continue;                          // not played this ranked week (e.g. last week's battles still in the log)
+        const h = { ix: ix++, ts, stars: Math.max(0, Math.min(3, r[2] || 0)), pct: r[3] || 0, time: r[8] || 0, code: r[5] || '' };
         (r[1] ? att : def).push(h);
       }
       let locked = 0;
       if (pth) for (let i = att.length - 1; i >= 0; i--) if (att[i].code && armyMinTh(att[i].code) > pth) { att.splice(i, 1); locked++; }
-      const mx = rec.lg ? maxAttacks(rec.lg[1]) : DEFAULT_MAX_ATK;
       att.sort((x, y) => x.ts - y.ts || y.ix - x.ix);
-      if (att.length > mx) att.splice(0, att.length - mx);
-      // defenses get the same cap: a week never holds more than the league's maximum, nor more than the game says the player took
-      // (rec.gw = [attack wins, attack losses, defense wins, defense losses]). Older logged battles are dropped, oldest first.
-      const gwDef = rec.gw ? (+rec.gw[2] || 0) + (+rec.gw[3] || 0) : 0, mxD = gwDef > 0 ? Math.min(mx, gwDef) : mx;
+      if (att.length > nAtk) att.splice(0, att.length - nAtk);   // never more detail than the game says was played (oldest dropped)
       def.sort((x, y) => x.ts - y.ts || y.ix - x.ix);
-      if (def.length > mxD) def.splice(0, def.length - mxD);
+      if (def.length > nDef) def.splice(0, def.length - nDef);
 
       const row = {
         tag, name: cleanName(rec.n, tag), th: pth,
-        lid: rec.lg ? rec.lg[0] || 0 : 0, ln: rec.lg ? rec.lg[1] || 'Unranked' : null, hasLg: !!rec.lg, tr: rec.tr || 0,
-        mx, ga: rec.gw ? rec.gw[0] + rec.gw[1] : null,
-        na: att.length, nd: def.length, st: 0, s3: 0, pct: 0, dz: 0, dst: 0, d3: 0, ot: 0, dt: 0, dur: 0, durN: 0, fast: null,
+        lid: rec.lg ? rec.lg[0] || 0 : 0, ln: rec.lg ? rec.lg[1] || 'Unranked' : null, hasLg: !!rec.lg && !!rec.gf, tr: rec.gf ? rec.tr || 0 : 0,   // profile trophies are not this week's ranked trophies; only the league group (gf) is
+        mx, ga: gw ? gw[0] + gw[1] : null,
+        na: nAtk, nd: nDef, la: att.length, ld: def.length, st: 0, s3: 0, pct: 0, dz: 0, dst: 0, d3: 0, ot: 0, dt: 0, dur: 0, durN: 0, fast: null,
         ah: [0, 0, 0, 0], dh: [0, 0, 0, 0],
       };
-      for (const t of targets) { t.G.tracked++; t.G.locked += locked; }
+      for (const t of targets) { t.G.tracked++; t.G.locked += locked; t.G.attGame += nAtk; t.G.defGame += nDef; }
       if (rec.lg && rec.lg[1]) for (const t of targets) { // players per league (current league as the crawler last saw it)
         const e = t.leagues.get(rec.lg[1]) || t.leagues.set(rec.lg[1], { name: rec.lg[1], lid: rec.lg[0] || 0, n: 0 }).get(rec.lg[1]);
         e.n++;
@@ -374,7 +389,7 @@ function processWeek(opts, key) {
       }
       if (row.na || row.nd) for (const t of targets) t.G.players++;
       if (row.na >= MIN_ATK) for (const t of targets) t.G.active++;
-      row.w3 = wilson(row.s3, row.na);
+      row.w3 = wilson(row.s3, row.la);
 
       // armies: group similar codes (same main-army troop types); the player's most used group is "their army"
       const groups = new Map();
@@ -485,8 +500,7 @@ function main() {
   const keys = weekList(opts.data, opts.week);
   const done = [];
   for (const key of keys) { const r = processWeek(opts, key); if (r) done.push(r); }
-  const cur = readCurrent(opts.data);
-  const curKey = cur && cur.start ? dateKey(Date.parse(cur.start)) : keys[0];
+  const curKey = weekKeyOf(weekStartAt(Date.now()));
   const ok = done.find(d => d.key === curKey);
   if (ok) {
     let gen = ok.generatedAt;
