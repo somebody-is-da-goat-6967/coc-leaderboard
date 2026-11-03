@@ -112,6 +112,22 @@ for (const [t, p] of Object.entries(store.players)) {
 }
 for (const [t, c] of Object.entries(store.clans)) if (!c.lastScanned) delete store.clans[t];
 
+// ---------- locked players ----------
+// battlelogs.mjs writes battlelogs/locks.json.gz: players with 8/8 attacks + 8/8 defenses in the open Legend day.
+// Nothing about them can change until the 05:00 UTC reset, so they are skipped by the refresh / straggler /
+// battle-discovery work below and their final trophies (fetched at the moment they were locked) are applied here.
+const locksFile = await (async () => {
+  try { return JSON.parse((await gunzip(await fs.readFile(path.join(OUT_DIR, 'battlelogs', 'locks.json.gz')))).toString()); } catch { return null; }
+})();
+const lockActive = locksFile && locksFile.until > started ? (locksFile.players || {}) : {};
+const isLocked = tag => !!lockActive[tag];
+// apply final trophies even from an expired lock (the 05:00 run still needs them for the end-of-day board),
+// but only if the lock is newer than what we already have
+for (const [tag, l] of Object.entries(locksFile?.players || {})) {
+  const p = store.players[tag];
+  if (p && typeof l.trophies === 'number' && l.at > (p.updated || 0)) { p.trophies = l.trophies; p.updated = l.at; }
+}
+
 // ---------- queue (cursor-based so big backlogs stay fast) ----------
 let queue = store.queue;
 let qi = 0;
@@ -270,7 +286,8 @@ async function battleDiscovery() {
   const misses = store.meta.opponentMisses ||= {};   // tag -> when we last found they are not Legend I
   for (const [t, ts] of Object.entries(misses)) if (t0 - ts > MISS_TTL_MS) delete misses[t];
 
-  const frontier = Object.keys(store.players).sort((a, b) =>
+  // locked players: their log is complete for the day; skip once it has been read after they were locked
+  const frontier = Object.keys(store.players).filter(t => !(isLocked(t) && (scanned[t] || 0) >= (lockActive[t].at || 0))).sort((a, b) =>
     (scanned[a] || 0) - (scanned[b] || 0) || (store.players[b].trophies || 0) - (store.players[a].trophies || 0));
   let fi = 0;
   const fresh = []; // players just added this run: their logs are read before the rest of the frontier
@@ -354,11 +371,17 @@ if (MODE === 'discover' || (MODE === 'auto' && Date.now() - (store.meta.lastDisc
 
 // refresh every known Legend clan, then individually fetch players that fell outside those clans
 const refreshStart = Date.now();
-await pool(Object.keys(store.clans), CONCURRENCY, async t => {
+// a clan whose known Legend members are ALL locked needs no scan; still re-check it now and then (new members, moves)
+const CLAN_RECHECK_MS = (+process.env.LOCKED_CLAN_RECHECK_MIN || 180) * 60_000;
+const clanMembers = new Map();
+for (const [t, p] of Object.entries(store.players)) if (p.clanTag) (clanMembers.get(p.clanTag) || clanMembers.set(p.clanTag, []).get(p.clanTag)).push(t);
+const clanDone = ct => { const m = clanMembers.get(ct); return !!m && m.length > 0 && m.every(isLocked) && refreshStart - (store.clans[ct]?.lastScanned || 0) < CLAN_RECHECK_MS; };
+const clanList = Object.keys(store.clans).filter(t => !clanDone(t));
+await pool(clanList, CONCURRENCY, async t => {
   try { await scanClan(t); } catch (e) { console.error(`refresh ${t}: ${e.message}`); }
 });
-const stragglers = Object.keys(store.players).filter(t => (store.players[t].updated || 0) < refreshStart);
-console.log(`refresh: ${Object.keys(store.clans).length} clan(s), ${stragglers.length} straggler(s)`);
+const stragglers = Object.keys(store.players).filter(t => !isLocked(t) && (store.players[t].updated || 0) < refreshStart);
+console.log(`refresh: ${clanList.length}/${Object.keys(store.clans).length} clan(s) scanned (${Object.keys(store.clans).length - clanList.length} all-locked, skipped), ${stragglers.length} straggler(s), ${Object.keys(lockActive).length} locked player(s)`);
 await pool(stragglers, CONCURRENCY, fetchPlayer);
 
 await battleDiscovery();
@@ -413,6 +436,7 @@ await write('leaderboard.json', { generatedAt: Date.now(), players });
 await write('meta.json', {
   generatedAt: Date.now(),
   legendPlayers: players.length,
+  lockedPlayers: Object.keys(lockActive).length,
   knownClans: nClans, scannedClans: nClans,
   queuedJobs: store.queue.length,
   nameSearchDictionary: prog, dictionarySize: words.length,
