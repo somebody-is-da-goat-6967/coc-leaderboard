@@ -37,6 +37,11 @@ const CATCHUP_MS = (+process.env.BATTLELOG_CATCHUP_MIN || 20) * 60_000;
 // how many daily files to keep. 0 = keep everything.
 const KEEP_DAYS = process.env.BATTLELOG_KEEP_DAYS !== undefined ? +process.env.BATTLELOG_KEEP_DAYS : 7;
 
+// A player with this many attacks AND defenses inside the open Legend day cannot change any more until the reset:
+// they get "locked" (final trophies + battlelog for the day) and are skipped by every later fetch.
+const LOCK_ATTACKS = +process.env.LOCK_ATTACKS || 8;
+const LOCK_DEFENSES = +process.env.LOCK_DEFENSES || 8;
+
 const DAY_MS = 86_400_000;
 const DAILY_RESET_UTC_HOUR = 5;
 const GIVE_UP_AFTER_MS = 6 * 3_600_000; // stop re-writing a day's file this long after the reset even if a few players failed
@@ -164,7 +169,13 @@ const roster = leaderboard.players.map(p => ({ tag: p.tag, name: p.name }));
 const rosterTags = new Set(roster.map(p => p.tag));
 roster.sort((a, b) => (state.players[a.tag]?.fetchedAt || 0) - (state.players[b.tag]?.fetchedAt || 0)); // stalest first
 
-let fetched = 0, failed = 0, added = 0, aborted = false;
+const dayEnd = reset + DAY_MS;
+const isLocked = tag => state.players[tag]?.lockedUntil === dayEnd;   // lock only ever covers the day it was set in
+const inOpenDay = r => { const t = msOf(r); return t >= reset && t < dayEnd; };
+const todo = roster.filter(p => !isLocked(p.tag));
+const lockedAtStart = roster.length - todo.length;
+
+let fetched = 0, failed = 0, added = 0, newlyLocked = 0, aborted = false;
 async function pool(items, n, fn) {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) || 0 }, async () => {
@@ -172,9 +183,9 @@ async function pool(items, n, fn) {
   }));
 }
 
-console.log(`battlelogs: ${roster.length} players, ${needCatchup ? 'catch-up' : 'normal'} budget ${Math.round((deadline - started) / 60000)} min`);
+console.log(`battlelogs: ${roster.length} players (${lockedAtStart} locked, ${todo.length} to fetch), ${needCatchup ? 'catch-up' : 'normal'} budget ${Math.round((deadline - started) / 60000)} min`);
 try {
-  await pool(roster, CONCURRENCY, async ({ tag, name }) => {
+  await pool(todo, CONCURRENCY, async ({ tag, name }) => {
     const entry = state.players[tag] ||= { name, fetchedAt: 0, attacks: [], defenses: [] };
     entry.name = name;
     try {
@@ -182,6 +193,19 @@ try {
       added += merge(entry, data.items || []);
       entry.fetchedAt = Date.now();
       fetched++;
+      // 8/8 attacks and 8/8 defenses: nothing can change until the reset. Grab the final trophies once and lock.
+      if (entry.attacks.filter(inOpenDay).length >= LOCK_ATTACKS && entry.defenses.filter(inOpenDay).length >= LOCK_DEFENSES) {
+        try {
+          const prof = await api(`/players/${enc(tag)}`);
+          if (typeof prof.trophies === 'number') {
+            entry.lockedUntil = dayEnd; entry.lockedAt = Date.now(); entry.lockedTrophies = prof.trophies;
+            newlyLocked++;
+          }
+        } catch (e) {
+          if (e.fatal) { aborted = true; console.error('403 from API while locking:', e.message); }
+          // anything else: stay unlocked, the next run tries again
+        }
+      }
     } catch (e) {
       if (e.notFound) entry.fetchedAt = Date.now();
       else {
@@ -205,7 +229,7 @@ for (const [tag, p] of Object.entries(state.players)) {
 }
 
 // ---------- build views ----------
-function view(from, to) {
+function view(from, to, flagLocked = false) {
   const players = {};
   let attacks = 0, defenses = 0;
   for (const [tag, p] of Object.entries(state.players)) {
@@ -213,12 +237,24 @@ function view(from, to) {
     const d = p.defenses.filter(r => msOf(r) >= from && msOf(r) < to);
     if (!a.length && !d.length) continue;
     players[tag] = { name: p.name, attacks: a, defenses: d };
+    if (flagLocked && p.lockedUntil === to) players[tag].final = true;
     attacks += a.length; defenses += d.length;
   }
   return { players, playersWithBattles: Object.keys(players).length, attacks, defenses };
 }
 const refreshedSince = t => roster.filter(p => (state.players[p.tag]?.fetchedAt || 0) >= t).length;
+// players whose closed day is complete: fetched since the reset, or locked (8/8) before it
+const completeForClosed = () => roster.filter(p => { const e = state.players[p.tag]; return (e?.fetchedAt || 0) >= reset || e?.lockedUntil === reset; }).length;
 const generatedAt = Date.now();
+
+// locks.json.gz: read by crawl.mjs on the next run (skip these players, apply their final trophies)
+const locks = { generatedAt, resetAt: reset, until: dayEnd, players: {} };
+for (const p of roster) {
+  const e = state.players[p.tag];
+  if (e?.lockedUntil === dayEnd) locks.players[p.tag] = { trophies: e.lockedTrophies, at: e.lockedAt };
+}
+await writeGz(path.join(BL_DIR, 'locks.json.gz'), locks);
+const playersLocked = Object.keys(locks.players).length;
 
 // live: the open Legend day
 const live = {
@@ -228,7 +264,8 @@ const live = {
   dayEnd: new Date(reset + DAY_MS).toISOString(),
   playersTracked: roster.length,
   playersRefreshedThisDay: refreshedSince(reset),
-  ...view(reset, reset + DAY_MS),
+  playersLocked,
+  ...view(reset, reset + DAY_MS, true),
 };
 await writeGz(path.join(BL_DIR, 'live.json.gz'), live);
 
@@ -236,7 +273,7 @@ await writeGz(path.join(BL_DIR, 'live.json.gz'), live);
 // since the reset (or GIVE_UP_AFTER_MS has passed), so the file ends up built from fresh post-reset data.
 let archiveInfo = state.meta.archives[closedKey] || null;
 if (needCatchup) {
-  const refreshed = refreshedSince(reset);
+  const refreshed = completeForClosed();
   const final = refreshed >= roster.length || now - reset >= GIVE_UP_AFTER_MS;
   const day = {
     generatedAt,
@@ -263,11 +300,11 @@ for (const k of Object.keys(state.meta.archives)) if (!dates.includes(k)) delete
 
 await fs.writeFile(path.join(BL_DIR, 'index.json'), JSON.stringify({
   generatedAt,
-  live: { date: live.date, dayStart: live.dayStart, dayEnd: live.dayEnd, playersWithBattles: live.playersWithBattles, attacks: live.attacks, defenses: live.defenses, playersRefreshedThisDay: live.playersRefreshedThisDay },
+  live: { date: live.date, dayStart: live.dayStart, dayEnd: live.dayEnd, playersWithBattles: live.playersWithBattles, attacks: live.attacks, defenses: live.defenses, playersRefreshedThisDay: live.playersRefreshedThisDay, playersLocked },
   playersTracked: roster.length,
   archives: dates.map(d => ({ date: d, final: !!state.meta.archives[d]?.final })),
 }));
 await writeGz(path.join(BL_DIR, 'state.json.gz'), state);
 
-console.log(`battlelogs: done in ${Math.round((Date.now() - started) / 1000)}s - fetched ${fetched}, failed ${failed}, new battles ${added}, live ${live.attacks} atk / ${live.defenses} def`);
+console.log(`battlelogs: done in ${Math.round((Date.now() - started) / 1000)}s - fetched ${fetched}, locked ${newlyLocked} new (${playersLocked} total), failed ${failed}, new battles ${added}, live ${live.attacks} atk / ${live.defenses} def`);
 process.exit(aborted && failed ? 1 : 0);
