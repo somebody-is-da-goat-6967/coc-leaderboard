@@ -329,8 +329,8 @@ function processWeek(opts, key) {
       const att = [], def = [];
       let ix = 0;
       for (const r of rec.b || []) {
-        let ts = r[0] || 0; if (ts > 0 && ts < 1e11) ts *= 1000;   // seconds -> ms
-        if (!(ts >= start && ts < end)) continue;                          // not played this ranked week (e.g. last week's battles still in the log)
+        let ts = r[0] || r[7] || 0; if (ts > 0 && ts < 1e11) ts *= 1000;   // seconds -> ms
+        if (!(ts >= start && ts < end)) continue;                          // ranked logs carry no battleTime: r[7] (first seen) is the date; the real cap is the league-group count below
         const h = { ix: ix++, ts, stars: Math.max(0, Math.min(3, r[2] || 0)), pct: r[3] || 0, time: r[8] || 0, code: r[5] || '' };
         (r[1] ? att : def).push(h);
       }
