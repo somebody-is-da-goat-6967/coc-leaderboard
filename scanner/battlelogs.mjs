@@ -172,6 +172,14 @@ roster.sort((a, b) => (state.players[a.tag]?.fetchedAt || 0) - (state.players[b.
 const dayEnd = reset + DAY_MS;
 const isLocked = tag => state.players[tag]?.lockedUntil === dayEnd;   // lock only ever covers the day it was set in
 const inOpenDay = r => { const t = msOf(r); return t >= reset && t < dayEnd; };
+const openDayCounts = entry => ({
+  attacks: entry.attacks.reduce((n, r) => n + Number(inOpenDay(r)), 0),
+  defenses: entry.defenses.reduce((n, r) => n + Number(inOpenDay(r)), 0),
+});
+const isComplete = entry => {
+  const counts = openDayCounts(entry);
+  return counts.attacks >= LOCK_ATTACKS && counts.defenses >= LOCK_DEFENSES;
+};
 const todo = roster.filter(p => !isLocked(p.tag));
 const lockedAtStart = roster.length - todo.length;
 
@@ -188,13 +196,30 @@ try {
   await pool(todo, CONCURRENCY, async ({ tag, name }) => {
     const entry = state.players[tag] ||= { name, fetchedAt: 0, attacks: [], defenses: [] };
     entry.name = name;
+    // A previous log fetch may already have captured 8/8, while the profile request used to
+    // snapshot trophies failed. Retry that one profile request before spending another log call.
+    if (isComplete(entry)) {
+      try {
+        const prof = await api(`/players/${enc(tag)}`);
+        if (typeof prof.trophies === 'number') {
+          entry.lockedUntil = dayEnd; entry.lockedAt = Date.now(); entry.lockedTrophies = prof.trophies;
+          newlyLocked++;
+          return;
+        }
+      } catch (e) {
+        if (e.fatal) { aborted = true; console.error('403 from API while locking:', e.message); }
+        // Keep it unlocked and retry on a later run. Do not make a redundant battlelog request.
+        return;
+      }
+      return;
+    }
     try {
       const data = await api(`/players/${enc(tag)}/battlelog`);
       added += merge(entry, data.items || []);
       entry.fetchedAt = Date.now();
       fetched++;
       // 8/8 attacks and 8/8 defenses: nothing can change until the reset. Grab the final trophies once and lock.
-      if (entry.attacks.filter(inOpenDay).length >= LOCK_ATTACKS && entry.defenses.filter(inOpenDay).length >= LOCK_DEFENSES) {
+      if (isComplete(entry)) {
         try {
           const prof = await api(`/players/${enc(tag)}`);
           if (typeof prof.trophies === 'number') {
