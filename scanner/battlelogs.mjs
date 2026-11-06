@@ -294,6 +294,41 @@ const live = {
 };
 await writeGz(path.join(BL_DIR, 'live.json.gz'), live);
 
+// Small precomputed payload consumed by the Discord bot. Keep the full battle
+// log for the website, but do not make lightweight clients download it.
+function trophyGain(stars, destruction) {
+  const pct = Math.floor(destruction || 0);
+  if (stars >= 3) return 40;
+  if (stars === 2) return Math.min(32, Math.max(16, 16 + Math.floor((pct - 50) / 3)));
+  if (stars === 1) return Math.min(15, Math.max(5, 5 + Math.floor((pct - 1) / 9)));
+  return Math.floor(pct / 10);
+}
+function statsSummary(day) {
+  const stars = [0, 0, 0, 0], armies = new Map(), players = [];
+  for (const [tag, p] of Object.entries(day.players)) {
+    let attackTrophies = 0, defenseTrophies = 0;
+    for (const h of p.attacks) {
+      const s = Math.max(0, Math.min(3, Number(h.stars) || 0)); stars[s]++;
+      attackTrophies += trophyGain(h.stars, h.destruction);
+      if (h.armyShareCode) {
+        const a = armies.get(h.armyShareCode) || { uses: 0, stars: 0, triples: 0, trophies: 0 };
+        a.uses++; a.stars += s; if (s === 3) a.triples++;
+        a.trophies += trophyGain(h.stars, h.destruction); armies.set(h.armyShareCode, a);
+      }
+    }
+    for (const h of p.defenses) defenseTrophies += trophyGain(h.stars, h.destruction);
+    players.push({ tag, name: p.name || tag, attacks: p.attacks.length, defenses: p.defenses.length, trophies: attackTrophies - defenseTrophies });
+  }
+  return { date: day.date, dayStart: day.dayStart, generatedAt: day.generatedAt,
+    players: players.length, attacks: day.attacks, defenses: day.defenses,
+    trophies: Object.values(day.players).flatMap(p => p.attacks).reduce((n, h) => n + trophyGain(h.stars, h.destruction), 0),
+    defenseTrophies: Object.values(day.players).flatMap(p => p.defenses).reduce((n, h) => n + trophyGain(h.stars, h.destruction), 0),
+    stars, topPlayers: players.sort((a, b) => b.trophies - a.trophies).slice(0, 10),
+    armies: [...armies].map(([code, v]) => ({ code, ...v })).sort((a, b) => b.uses - a.uses).slice(0, 10) };
+}
+const liveSummary = statsSummary(live);
+await fs.writeFile(path.join(BL_DIR, 'stats.json'), JSON.stringify(liveSummary));
+
 // daily copy: the Legend day that just closed. Re-written each run until every player has been fetched
 // since the reset (or GIVE_UP_AFTER_MS has passed), so the file ends up built from fresh post-reset data.
 let archiveInfo = state.meta.archives[closedKey] || null;

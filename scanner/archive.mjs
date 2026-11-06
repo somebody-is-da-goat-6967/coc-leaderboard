@@ -89,6 +89,28 @@ for (const [idx, dates] of groups) {
     }
     writeGz(sf, agg);
 
+    // Compact global payload for Discord and other clients. The site keeps
+    // using season.json.gz; bots can read this tiny precomputed summary.
+    const summaryPlayers = Object.entries(agg.players || {}).map(([tag, p]) => ({
+      tag: tag.startsWith('#') ? tag : `#${tag}`, name: p.n || tag,
+      attacks: p.na || 0, defenses: p.nd || 0,
+      trophies: (p.a || 0) - (p.d || 0), rank: p.r || 0,
+    })).filter(p => p.attacks || p.defenses).sort((a, b) => b.trophies - a.trophies).slice(0, 10);
+    const armyTotals = new Map();
+    for (const p of Object.values(agg.players || {})) for (const [ci, v] of Object.entries(p.arm || {})) {
+      const code = agg.codes[+ci]; if (!code) continue;
+      const a = armyTotals.get(code) || { uses: 0, stars: 0, triples: 0, trophies: 0 };
+      a.uses += v[0] || 0; a.stars += v[1] || 0; a.triples += v[2] || 0; a.trophies += v[3] || 0;
+      armyTotals.set(code, a);
+    }
+    fs.writeFileSync(path.join(tmp, 'stats.json'), JSON.stringify({
+      season: key, days: agg.days.length, lengthDays: agg.lengthDays,
+      players: Object.keys(agg.players || {}).length,
+      attacks: agg.G.att, defenses: agg.G.def, trophies: agg.G.aT, defenseTrophies: agg.G.dT,
+      stars: agg.G.astars, topPlayers: summaryPlayers,
+      armies: [...armyTotals].map(([code, v]) => ({ code, ...v })).sort((a, b) => b.uses - a.uses).slice(0, 10),
+    }));
+
     fs.writeFileSync(path.join(tmp, 'index.json'), JSON.stringify({
       season: key,
       seasonStart: new Date(ANCHOR + idx * SEASON_MS).toISOString(),
