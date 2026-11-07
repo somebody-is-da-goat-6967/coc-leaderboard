@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-06",
+ "players": 11700,
+ "attacks": 88892,
+ "defenses": 88836,
+ "perfectDays": 100,
+ "zeroStarDefenses": 333,
+ "tripleRate": 0.43796967106151286,
+ "shielded": 2219,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+132",
+   "name": "LOA「⫶」BU ABOODシ",
+   "tag": "9P9P809R",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:04",
+   "name": "Jônatan",
+   "tag": "9Y2RJG",
+   "tied": 1
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−155",
+   "name": "JATIN SAINI",
+   "tag": "PGJG9GJ2J",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Dagdeeg~TN",
+   "tag": "G2V8UPJP9",
+   "tied": 1
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,740",
+   "name": "Levi_Neiva",
+   "tag": "C8R989YJ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+12,610",
+   "name": "SAITAMA",
+   "tag": "PQ28CY9PJ",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+113",
+   "name": "BK",
+   "tag": "202GRJCJJ",
+   "tied": 1
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Duke Charge (Fox) + Dragon Riders",
+  "players": 206,
+  "attacks": 1579,
+  "tripleRate": 0.545915136162128,
+  "avgStars": 2.4654844838505383,
+  "code": "h2m1p16e4_34-4p4e6_13-6p17e43_35-7p10e52_59i1x188-1x5-2x65d1x70-1x98u1x17-8x65-3x63-1x23-7x57-1x6-1x10-1x0-4x1s2x5-1x9-6x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2466,
+  "share": 0.21904423521051697
+ }
+}
