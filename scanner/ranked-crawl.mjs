@@ -75,7 +75,7 @@ function parseTime(s) { // 20261028T123456.000Z
 }
 
 // ---------- seeds ----------
-// Accepts the flat array ["#TAG", ...] or the detailed { "17": { "2026-10-26": [...] } } file.
+// Accepts the flat array ["#TAG", ...] or a detailed town hall/week map, for example { "17": { "2026-10-26": [...] }, "19": { ... } }.
 function loadSeeds() {
   const raw = JSON.parse(fs.readFileSync(SEED_FILE, 'utf8'));
   const map = new Map(); // tag -> town hall (or null)

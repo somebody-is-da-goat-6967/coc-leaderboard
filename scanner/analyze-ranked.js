@@ -25,8 +25,8 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 7;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail
-const MIN_TH = 7, MAX_TH = 17;
+const SCRIPT_REV = 8;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19
+const MIN_TH = 7, MAX_TH = 19;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
 // A ranked week starts every Monday 17:00 UTC (= 9:00 PST), exactly like ranked-crawl.mjs (same env names, same defaults).
