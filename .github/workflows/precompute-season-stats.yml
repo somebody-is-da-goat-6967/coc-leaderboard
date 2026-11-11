@@ -1,0 +1,48 @@
+name: precompute-season-stats
+on:
+  workflow_run:
+    workflows: ["crawl-legend-board"]
+    types: [completed]
+  schedule:
+    - cron: "42 */6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: precompute-season-stats
+  cancel-in-progress: false
+jobs:
+  compute:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src
+      - uses: actions/checkout@v4
+        with:
+          ref: data
+          path: data
+      - uses: actions/checkout@v4
+        with:
+          repository: somebody-is-da-goat-6967/website
+          ref: main
+          path: site
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore computed results
+        run: |
+          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git clone --depth 1 --branch computed-season "$URL" out || { mkdir out; git -C out init -q -b computed-season; git -C out remote add origin "$URL"; }
+      - name: Compute season stats
+        run: node site/scripts/precompute-site-stats.mjs --mode season --data data --site site --out out
+      - name: Publish computed results
+        working-directory: out
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "season stats $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push origin HEAD:computed-season
