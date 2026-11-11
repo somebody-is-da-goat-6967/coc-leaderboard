@@ -226,6 +226,10 @@ function noteCrawl(rec, added, nowSec) { // smoothed battles-per-hour; the first
 // are tracked. Requiring every recorded duration to be under 180s avoids flagging a
 // long attack just because the other side's log was incomplete or inconsistent.
 function buildWintraders(players, seeds, generatedAt) {
+  // Read the original 9-slot shard rows as well as the enriched rows written by this
+  // change. The appended opponent TH/name fields only improve labels; they are not
+  // required to classify already-saved battles.
+  const battleField = (row, index, key) => Array.isArray(row) ? row[index] : row?.[key];
   const known = new Map();
   const tracked = new Set(seeds.keys());
   const node = (tag, name, th) => {
@@ -245,16 +249,21 @@ function buildWintraders(players, seeds, generatedAt) {
   for (const [ownerTag, rec] of players) {
     if (!tracked.has(ownerTag)) continue;
     for (const r of rec.b || []) {
-      const at = Number(r[0]), oppTag = String(r[4] || '');
-      const duration = Number(r[8]) || 0, stars = Number(r[2]);
+      const at = Number(battleField(r, 0, 'time'));
+      const oppTag = String(battleField(r, 4, 'opponentTag') || '');
+      const duration = Number(battleField(r, 8, 'duration')) || 0;
+      const stars = Number(battleField(r, 2, 'stars'));
       if (!at || !oppTag || oppTag === ownerTag || stars !== 0 || duration <= 0) continue;
-      if (r[6] !== 'ranked' && r[6] !== 'legend') continue;
+      const type = battleField(r, 6, 'type') || battleField(r, 6, 'battleType');
+      if (type !== 'ranked' && type !== 'legend') continue;
 
-      const ownerIsAttacker = Number(r[1]) === 1;
+      const ownerIsAttacker = Number(battleField(r, 1, 'attack')) === 1;
       const attackerTag = ownerIsAttacker ? ownerTag : oppTag;
       const defenderTag = ownerIsAttacker ? oppTag : ownerTag;
-      const attacker = node(attackerTag, ownerIsAttacker ? rec.n : r[10], ownerIsAttacker ? rec.th : r[9]);
-      const defender = node(defenderTag, ownerIsAttacker ? r[10] : rec.n, ownerIsAttacker ? r[9] : rec.th);
+      const oppName = battleField(r, 10, 'opponentName');
+      const oppTh = battleField(r, 9, 'opponentTownHall');
+      const attacker = node(attackerTag, ownerIsAttacker ? rec.n : oppName, ownerIsAttacker ? rec.th : oppTh);
+      const defender = node(defenderTag, ownerIsAttacker ? oppName : rec.n, ownerIsAttacker ? oppTh : rec.th);
       const key = `${at}|${defenderTag}|${attackerTag}`;
       const battle = byBattle.get(key) || {
         time: new Date(at * 1000).toISOString(), timestamp: at,
@@ -299,7 +308,10 @@ function buildWintraders(players, seeds, generatedAt) {
   const townHalls = new Set([...seeds.values()].filter(Number.isFinite));
   for (const player of players.values()) {
     if (player.th) townHalls.add(Number(player.th));
-    for (const battle of player.b || []) if (battle[9]) townHalls.add(Number(battle[9]));
+    for (const battle of player.b || []) {
+      const opponentTh = battleField(battle, 9, 'opponentTownHall');
+      if (opponentTh) townHalls.add(Number(opponentTh));
+    }
   }
   return {
     generatedAt: new Date(generatedAt).toISOString(),
