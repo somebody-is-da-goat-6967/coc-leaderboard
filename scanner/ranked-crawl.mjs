@@ -5,7 +5,8 @@
 //   ranked/current.json                      summary of the latest run
 //   ranked/<weekStart YYYY-MM-DD>/state.json last run info
 //   ranked/<weekStart>/shards/th<N>.json.gz  one file per town hall (th0 = town hall unknown):
-//       { "#TAG": { th, n: name, b: [[time, atk, stars, pct, oppTag, armyCode, type, firstSeen, duration], ...] } }
+//       { "#TAG": { th, n: name, b: [[time, atk, stars, pct, oppTag, armyCode, type, firstSeen, duration, oppTH, oppName], ...] } }
+//   ranked/<weekStart>/wintraders.json        current-week short zero-star ranked battle links for the website
 //       time/firstSeen are unix seconds (time 0 = the log had no battleTime); atk 1 = attack, 0 = defense
 //   Each player record also carries the profile data fetched from /players/<tag> (profile phase):
 //       n = name, th = current town hall, lg = [leagueId, leagueName], tr = trophies, pt = unix seconds of the profile fetch
@@ -185,7 +186,7 @@ function mergeLog(rec, log, nowSec) {
     if (t !== null && (t < start.getTime() || t >= end.getTime())) continue;
     const r = [t ? Math.floor(t / 1000) : 0, e.attack ? 1 : 0, e.stars ?? 0, e.destructionPercentage ?? 0,
                e.opponentPlayerTag || '', e.armyShareCode || '', type, nowSec,
-               Number(e.duration ?? e.battleDuration) || 0];
+               Number(e.duration ?? e.battleDuration) || 0, Number(e.opponentTownHallLevel) || 0, e.opponentName || ''];
     entries++;
     const k = keyOf(r);
     if (seen.has(k)) continue;
@@ -218,6 +219,99 @@ function noteCrawl(rec, added, nowSec) { // smoothed battles-per-hour; the first
   const h = rec.lc ? Math.max((nowSec - rec.lc) / 3600, 0.25) : 24, r = added / h;
   rec.rt = rec.rt == null ? +r.toFixed(2) : +(0.5 * rec.rt + 0.5 * r).toFixed(2);
   rec.lc = nowSec;
+}
+
+// A short zero-star result is only a suspicion signal. Build it from either side's
+// battlelog entry, then reconcile the two copies of the same battle when both players
+// are tracked. Requiring every recorded duration to be under 180s avoids flagging a
+// long attack just because the other side's log was incomplete or inconsistent.
+function buildWintraders(players, seeds, generatedAt) {
+  const known = new Map();
+  const tracked = new Set(seeds.keys());
+  const node = (tag, name, th) => {
+    if (!tag) return null;
+    const old = known.get(tag) || { tag, name: tag, th: 0 };
+    if (name && (!old.name || old.name === tag)) old.name = name;
+    if (th) old.th = th;
+    known.set(tag, old);
+    return old;
+  };
+  for (const [tag, rec] of players) {
+    if (!tracked.has(tag)) continue;
+    node(tag, rec.n, Number(rec.th) || seeds.get(tag) || 0);
+  }
+
+  const byBattle = new Map();
+  for (const [ownerTag, rec] of players) {
+    if (!tracked.has(ownerTag)) continue;
+    for (const r of rec.b || []) {
+      const at = Number(r[0]), oppTag = String(r[4] || '');
+      const duration = Number(r[8]) || 0, stars = Number(r[2]);
+      if (!at || !oppTag || oppTag === ownerTag || stars !== 0 || duration <= 0) continue;
+      if (r[6] !== 'ranked' && r[6] !== 'legend') continue;
+
+      const ownerIsAttacker = Number(r[1]) === 1;
+      const attackerTag = ownerIsAttacker ? ownerTag : oppTag;
+      const defenderTag = ownerIsAttacker ? oppTag : ownerTag;
+      const attacker = node(attackerTag, ownerIsAttacker ? rec.n : r[10], ownerIsAttacker ? rec.th : r[9]);
+      const defender = node(defenderTag, ownerIsAttacker ? r[10] : rec.n, ownerIsAttacker ? r[9] : rec.th);
+      const key = `${at}|${defenderTag}|${attackerTag}`;
+      const battle = byBattle.get(key) || {
+        time: new Date(at * 1000).toISOString(), timestamp: at,
+        attackerTag, defenderTag, attacker, defender, durations: [], types: new Set(),
+      };
+      battle.durations.push(duration);
+      battle.types.add(r[6]);
+      byBattle.set(key, battle);
+    }
+  }
+
+  const connections = new Map();
+  for (const battle of byBattle.values()) {
+    const duration = Math.max(...battle.durations);
+    if (duration >= 180) continue;
+    const key = `${battle.defenderTag}|${battle.attackerTag}`;
+    const edge = connections.get(key) || {
+      defender: battle.defender, attacker: battle.attacker, battles: [],
+    };
+    edge.battles.push({ time: battle.time, duration, types: [...battle.types] });
+    connections.set(key, edge);
+  }
+  const edges = [...connections.values()].map((edge) => {
+    edge.battles.sort((a, b) => a.time.localeCompare(b.time));
+    const durations = edge.battles.map((b) => b.duration);
+    return {
+      defender: edge.defender, attacker: edge.attacker,
+      count: edge.battles.length, minDuration: Math.min(...durations),
+      avgDuration: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+      first: edge.battles[0].time, last: edge.battles.at(-1).time,
+      battles: edge.battles,
+    };
+  }).sort((a, b) => b.count - a.count || a.defender.tag.localeCompare(b.defender.tag) || a.attacker.tag.localeCompare(b.attacker.tag));
+  const involved = new Map();
+  for (const edge of edges) {
+    for (const [person, direction] of [[edge.defender, 'gave'], [edge.attacker, 'received']]) {
+      const row = involved.get(person.tag) || { ...person, gave: 0, received: 0, connections: 0 };
+      row[direction] += edge.count; row.connections++;
+      involved.set(person.tag, row);
+    }
+  }
+  const townHalls = new Set([...seeds.values()].filter(Number.isFinite));
+  for (const player of players.values()) {
+    if (player.th) townHalls.add(Number(player.th));
+    for (const battle of player.b || []) if (battle[9]) townHalls.add(Number(battle[9]));
+  }
+  return {
+    generatedAt: new Date(generatedAt).toISOString(),
+    weekKey, weekStart: start.toISOString(), weekEnd: end.toISOString(),
+    playersTracked: seeds.size,
+    playersWithBattlelogs: [...tracked].filter((tag) => players.get(tag)?.lc).length,
+    townHalls: [...townHalls].filter(Boolean).sort((a, b) => a - b),
+    suspectedBattles: edges.reduce((sum, edge) => sum + edge.count, 0),
+    playersInvolved: involved.size,
+    connections: edges,
+    players: [...involved.values()].sort((a, b) => (b.gave + b.received) - (a.gave + a.received) || a.name.localeCompare(b.name)),
+  };
 }
 
 // ---------- main ----------
@@ -337,6 +431,8 @@ for (const [tag, rec] of players) if (!rec.n && names.has(tag)) rec.n = names.ge
 saveShards(players);
 fs.mkdirSync(weekDir, { recursive: true });
 fs.writeFileSync(statePath, JSON.stringify({ mode: MODE, ranAt: new Date().toISOString() }));
+const wintraders = buildWintraders(players, seeds, Date.now());
+fs.writeFileSync(path.join(weekDir, 'wintraders.json'), JSON.stringify(wintraders));
 let totalBattles = 0, withBattles = 0, withLeague = 0, withGroup = 0;
 for (const v of players.values()) { totalBattles += v.b.length; if (v.b.length) withBattles++; if (v.lg) withLeague++; if (v.gf) withGroup++; }
 fs.writeFileSync(path.join(OUT, 'ranked', 'current.json'), JSON.stringify({
