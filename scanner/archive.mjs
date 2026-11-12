@@ -95,7 +95,7 @@ for (const [idx, dates] of groups) {
       tag: tag.startsWith('#') ? tag : `#${tag}`, name: p.n || tag,
       attacks: p.na || 0, defenses: p.nd || 0,
       trophies: (p.a || 0) - (p.d || 0), rank: p.r || 0,
-    })).filter(p => p.attacks || p.defenses).sort((a, b) => b.trophies - a.trophies).slice(0, 10);
+    })).filter(p => p.attacks || p.defenses).sort((a, b) => b.trophies - a.trophies).slice(0, 100);
     const armyTotals = new Map();
     for (const p of Object.values(agg.players || {})) for (const [ci, v] of Object.entries(p.arm || {})) {
       const code = agg.codes[+ci]; if (!code) continue;

@@ -323,7 +323,7 @@ function statsSummary(day) {
     players: players.length, attacks: day.attacks, defenses: day.defenses,
     trophies: Object.values(day.players).flatMap(p => p.attacks).reduce((n, h) => n + trophyGain(h.stars, h.destruction), 0),
     defenseTrophies: Object.values(day.players).flatMap(p => p.defenses).reduce((n, h) => n + trophyGain(h.stars, h.destruction), 0),
-    stars, topPlayers: players.sort((a, b) => b.trophies - a.trophies).slice(0, 10),
+    stars, topPlayers: players.sort((a, b) => b.trophies - a.trophies).slice(0, 100),
     armies: [...armies].map(([code, v]) => ({ code, ...v })).sort((a, b) => b.uses - a.uses).slice(0, 10) };
 }
 const liveSummary = statsSummary(live);
