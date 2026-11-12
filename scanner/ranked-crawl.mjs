@@ -171,25 +171,39 @@ function applyProfile(rec, p, nowSec) {
 const keyOf = r => r[0]
   ? `${r[0]}|${r[1]}|${r[4]}`                       // time known: time + direction + opponent
   : `${r[1]}|${r[4]}|${r[2]}|${r[3]}|${r[5]}`;      // no battleTime in the log: best-effort identity
+const legacyKeyOf = r => `${r[1]}|${r[4]}|${r[2]}|${r[3]}|${r[5]}`;
 const typeCounts = {};
 const names = new Map(); // tag -> name, collected from the opponent fields of every log
 
 function mergeLog(rec, log, nowSec) {
   const seen = new Set(rec.b.map(keyOf));
+  // Older ranked-crawl runs read the timestamp from the duration field, leaving
+  // timestamp=0 and duration=0. Replace a matching legacy row with the corrected
+  // API fields instead of keeping a duplicate beside it.
+  const legacy = new Map();
+  rec.b.forEach((r, i) => { if (!r[0]) legacy.set(legacyKeyOf(r), i); });
   let added = 0, entries = 0;
   for (const e of log.items || log || []) {
     if (e.opponentPlayerTag && e.opponentName) names.set(norm(e.opponentPlayerTag), e.opponentName);
     const type = String(e.battleType || '').toLowerCase();
     typeCounts[type] = (typeCounts[type] || 0) + 1;
     if (!BATTLE_TYPES.includes(type)) continue;
-    const t = parseTime(e.battleTime);
+    const rawTime = e.battleTimestamp ?? e.time ?? (typeof e.battleTime === 'string' ? e.battleTime : null);
+    const t = parseTime(rawTime);
     if (t !== null && (t < start.getTime() || t >= end.getTime())) continue;
+    const duration = typeof e.battleTime === 'number' ? e.battleTime : Number(e.duration ?? e.battleDuration) || 0;
     const r = [t ? Math.floor(t / 1000) : 0, e.attack ? 1 : 0, e.stars ?? 0, e.destructionPercentage ?? 0,
                e.opponentPlayerTag || '', e.armyShareCode || '', type, nowSec,
-               Number(e.duration ?? e.battleDuration) || 0, Number(e.opponentTownHallLevel) || 0, e.opponentName || ''];
+               Number(duration) || 0, Number(e.opponentTownHallLevel) || 0, e.opponentName || ''];
     entries++;
     const k = keyOf(r);
     if (seen.has(k)) continue;
+    const oldIndex = legacy.get(legacyKeyOf(r));
+    if (oldIndex !== undefined) {
+      rec.b[oldIndex] = r;
+      legacy.delete(legacyKeyOf(r)); seen.add(k); added++;
+      continue;
+    }
     seen.add(k); rec.b.push(r); added++;
   }
   return { added, entries, overlap: entries - added }; // overlap 0 with a full log = battles probably fell out unseen

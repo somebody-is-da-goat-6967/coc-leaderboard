@@ -69,17 +69,97 @@ async function daily() {
   for (const a of idx.archives || []) await run(path.join(dataDir, 'battlelogs', `${a.date}.json.gz`), a.date);
 }
 
+async function fetchRemoteJson(url, gzip = false) {
+  const response = await fetch(`${url}?t=${Date.now()}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const raw = gzip || (bytes[0] === 0x1f && bytes[1] === 0x8b)
+    ? zlib.gunzipSync(bytes).toString('utf8')
+    : bytes.toString('utf8');
+  return JSON.parse(raw);
+}
+
+function buildSeasonWintraders(key, dayRows, daysExpected) {
+  const battles = new Map(), playerTotals = new Map();
+  for (const { date, day } of dayRows) {
+    for (const [defenderRaw, player] of Object.entries(day.players || {})) {
+      const defenderTag = defenderRaw.startsWith('#') ? defenderRaw : `#${defenderRaw}`;
+      for (const h of player.defenses || []) {
+        if (Number(h.stars) !== 0) continue;
+        const count = playerTotals.get(defenderTag) || { tag: defenderTag, name: player.name || defenderTag, count: 0 };
+        count.count++; playerTotals.set(defenderTag, count);
+        const attackerTag = String(h.opponentTag || '');
+        if (!attackerTag) continue;
+        const time = String(h.time || '');
+        const id = `${time}|${defenderTag}|${attackerTag}`;
+        const battle = battles.get(id) || {
+          time, duration: 0, suspicious: false,
+          defender: { tag: defenderTag, name: player.name || defenderTag, th: 0 },
+          attacker: { tag: attackerTag, name: h.opponentName || attackerTag, th: Number(h.opponentTownHall) || 0 },
+          types: ['legend'],
+        };
+        const duration = Number(h.duration) || 0;
+        if (duration > battle.duration) battle.duration = duration;
+        battle.suspicious = battle.duration > 0 && battle.duration < 180;
+        if (!battle.time) battle.time = `${date}T00:00:00.000Z`;
+        battles.set(id, battle);
+      }
+    }
+  }
+
+  const pairs = new Map();
+  for (const battle of battles.values()) {
+    const key = `${battle.defender.tag}|${battle.attacker.tag}`;
+    const pair = pairs.get(key) || { defender: battle.defender, attacker: battle.attacker, battles: [], suspiciousCount: 0 };
+    pair.battles.push(battle);
+    if (battle.suspicious) pair.suspiciousCount++;
+    pairs.set(key, pair);
+  }
+  const connections = [...pairs.values()].map((pair) => {
+    pair.battles.sort((a, b) => a.time.localeCompare(b.time));
+    const durations = pair.battles.map((battle) => battle.duration).filter((duration) => duration > 0);
+    return {
+      defender: pair.defender, attacker: pair.attacker,
+      count: pair.battles.length, suspiciousCount: pair.suspiciousCount,
+      minDuration: durations.length ? Math.min(...durations) : 0,
+      avgDuration: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : 0,
+      first: pair.battles[0].time, last: pair.battles.at(-1).time, battles: pair.battles,
+    };
+  }).sort((a, b) => b.count - a.count || a.defender.tag.localeCompare(b.defender.tag) || a.attacker.tag.localeCompare(b.attacker.tag));
+  const leaders = [...playerTotals.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 100);
+  return {
+    schema: 1, kind: 'season-wintraders', season: key,
+    generatedAt: new Date().toISOString(), daysIncluded: dayRows.length, daysExpected,
+    zeroStarDefenses: [...playerTotals.values()].reduce((sum, player) => sum + player.count, 0),
+    suspiciousDefenses: connections.reduce((sum, pair) => sum + pair.suspiciousCount, 0),
+    leaders, connections,
+  };
+}
+
 async function season() {
   const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
   const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
   const repo = 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard';
   for (const n of [current, current - 1]) {
     const key = new Date(anchor + n * span).toISOString().slice(0, 10), url = `${repo}/archive-s${key}/season.json.gz`;
-    const res = await fetch(url); if (res.status === 404) { console.log(`[precompute:season] missing season ${key}`); continue; }
-    if (!res.ok) throw new Error(`Season ${key}: HTTP ${res.status}`);
-    const raw = JSON.parse(zlib.gunzipSync(Buffer.from(await res.arrayBuffer())).toString('utf8'));
+    const raw = await fetchRemoteJson(url, true);
+    if (!raw) { console.log(`[precompute:season] missing season ${key}`); continue; }
     const S = await call(context, 'computeSeason(__input.agg, () => {}, () => false)', { agg: raw });
     writeGz(`${key}.json.gz`, { schema: 1, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
+
+    const index = await fetchRemoteJson(`${repo}/archive-s${key}/index.json`);
+    const dates = index?.days || [], dayRows = [];
+    for (let i = 0; i < dates.length; i += 6) {
+      const batch = dates.slice(i, i + 6);
+      const rows = await Promise.all(batch.map(async (date) => {
+        const day = await fetchRemoteJson(`${repo}/archive-s${key}/days/${date}.json.gz`, true);
+        return day ? { date, day } : null;
+      }));
+      dayRows.push(...rows.filter(Boolean));
+    }
+    writeGz(`wintraders/${key}.json.gz`, buildSeasonWintraders(key, dayRows, raw.lengthDays || 28));
+    console.log(`[precompute:season] ${key}: processed ${dayRows.length}/${raw.lengthDays || 28} archived battlelog days`);
   }
 }
 
