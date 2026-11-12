@@ -210,7 +210,12 @@ async function season() {
       }));
       dayRows.push(...rows.filter(Boolean));
     }
-    writeGz(`wintraders/${key}.json.gz`, buildSeasonWintraders(key, dayRows, raw.lengthDays || 28));
+    const flow = buildSeasonWintraders(key, dayRows, raw.lengthDays || 28);
+    flow.leaders = Object.entries(raw.players || {}).map(([tag, player]) => ({
+      tag: tag.startsWith('#') ? tag : `#${tag}`, name: player.n || tag, count: Number(player.dz) || 0,
+    })).filter((player) => player.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 100);
+    writeGz(`wintraders/${key}-leaders.json.gz`, { ...flow, connections: undefined });
+    writeGz(`wintraders/${key}.json.gz`, flow);
     console.log(`[precompute:season] ${key}: processed ${dayRows.length}/${raw.lengthDays || 28} archived battlelog days`);
   }
 }
