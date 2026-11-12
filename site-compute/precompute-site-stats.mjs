@@ -26,6 +26,51 @@ function writeGz(rel, payload) {
   fs.writeFileSync(file, zlib.gzipSync(encode(payload), { level: 9 }));
   console.log(`[precompute:${mode}] ${rel} (${Math.round(fs.statSync(file).size / 1024)} KB)`);
 }
+function writeJson(rel, payload) {
+  const file = path.join(outDir, rel); fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(payload));
+  console.log(`[precompute:${mode}] ${rel} (${Math.round(fs.statSync(file).size / 1024)} KB)`);
+}
+const fmtN = (n, d = 0) => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const avgOf = (n, d, places = 2) => d ? fmtN(n / d, places) : '–';
+const pctOf = (n, d) => d ? `${fmtN(100 * n / d, 1)}%` : '–';
+const signed = n => `${n > 0 ? '+' : ''}${fmtN(n)}`;
+const rankOrder = (a, b) => (a.rank || 1e9) - (b.rank || 1e9);
+
+function seasonLeaderboards(S) {
+  const rows = S.rows || [], by = (arr, cmp, value, detail) => [...arr].sort(cmp).slice(0, 10).map(r => ({
+    tag: r.tag, name: r.name || r.tag, value: value(r), detail: detail(r),
+  }));
+  const moved = rows.filter(r => r.delta && Math.min(r.rank, r.r0) <= 2500);
+  return {
+    top_offense: by(rows, (a, b) => b.a - a.a || rankOrder(a, b),
+      r => `+${fmtN(r.a)} trophies`, r => `+${avgOf(r.a, r.dy)} trophies/day · ${fmtN(r.na)} attacks · ${fmtN(r.s3)}×3★ · ${fmtN(r.dy)} days`),
+    avg_offense: by(rows.filter(r => r.na >= 8 && r.dy > 0), (a, b) => b.a / b.dy - a.a / a.dy || rankOrder(a, b),
+      r => `+${avgOf(r.a, r.dy)} trophies/day`, r => `${fmtN(r.dy)} days · ${fmtN(r.na)} attacks`),
+    avg_defense: by(rows.filter(r => r.nd >= 8), (a, b) => a.d / a.nd - b.d / b.nd || rankOrder(a, b),
+      r => `−${avgOf(r.d, r.nd)} per defense`, r => `${fmtN(r.nd)} defenses · ${fmtN(r.d)} trophies lost`),
+    best_net: by(rows, (a, b) => b.net - a.net || rankOrder(a, b),
+      r => `${signed(r.net)} trophies`, r => `+${fmtN(r.a)} offense · −${fmtN(r.d)} defense`),
+    triples: by(rows, (a, b) => b.s3 - a.s3 || rankOrder(a, b),
+      r => `${fmtN(r.s3)} triples`, r => `${fmtN(r.na)} attacks · ${pctOf(r.s3, r.na)} 3★`),
+    triple_rate: by(rows.filter(r => r.na >= 8), (a, b) => b.s3 / b.na - a.s3 / a.na || rankOrder(a, b),
+      r => `${pctOf(r.s3, r.na)} 3★`, r => `${fmtN(r.s3)} triples of ${fmtN(r.na)} attacks`),
+    perfect_days: by(rows.filter(r => r.pf > 0), (a, b) => b.pf - a.pf || rankOrder(a, b),
+      r => `${fmtN(r.pf)} perfect days`, r => `${fmtN(r.fu)} days with all 8 attacks`),
+    zero_defenses: by(rows, (a, b) => b.dz - a.dz || b.nd - a.nd || rankOrder(a, b),
+      r => `${fmtN(r.dz)} × 0★`, r => `${fmtN(r.nd)} defenses · −${fmtN(r.d)} trophies`),
+    climbers: by(moved, (a, b) => b.delta - a.delta || rankOrder(a, b),
+      r => `▲ ${fmtN(Math.abs(r.delta))} places`, r => `#${fmtN(r.r0)} → #${fmtN(r.rank)} · net ${signed(r.net)}`),
+    drops: by(moved, (a, b) => a.delta - b.delta || rankOrder(a, b),
+      r => `▼ ${fmtN(Math.abs(r.delta))} places`, r => `#${fmtN(r.r0)} → #${fmtN(r.rank)} · net ${signed(r.net)}`),
+    fastest_triples: by(S.fast || [], (a, b) => a.time - b.time || rankOrder(a, b),
+      r => `${Math.floor(r.time / 60)}:${String(r.time % 60).padStart(2, '0')}`,
+      r => `3★ vs ${r.opp || 'Unknown'} · ${r.date || 'date unavailable'}${r.rank ? ` · #${fmtN(r.rank)}` : ''}`),
+    giant_killers: by(S.upsets || [], (a, b) => (b.rank - b.oppRank) - (a.rank - a.oppRank) || rankOrder(a, b),
+      r => `+${fmtN(r.rank - r.oppRank)} rank gap`,
+      r => `3★ vs ${r.opp || 'Unknown'} (#${fmtN(r.oppRank)}) · attacker #${fmtN(r.rank)} · ${r.date || 'date unavailable'}`),
+  };
+}
 function makeContext(files, th19 = false) {
   const stub = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => ({ setAttribute() {}, append() {}, classList: { add() {}, remove() {}, toggle() {} } }), addEventListener() {}, body: { append() {} }, head: { append() {} } };
   const context = vm.createContext({ window: { TH19_MODE: th19 }, document: stub, location: { protocol: 'https:', search: '' }, navigator: {}, setTimeout, clearTimeout, requestAnimationFrame: (f) => setTimeout(f, 0), console });
@@ -147,6 +192,12 @@ async function season() {
     if (!raw) { console.log(`[precompute:season] missing season ${key}`); continue; }
     const S = await call(context, 'computeSeason(__input.agg, () => {}, () => false)', { agg: raw });
     writeGz(`${key}.json.gz`, { schema: 1, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
+    writeJson(`leaderboards/${key}.json`, {
+      schema: 1, kind: 'season-leaderboards', key, season: S.agg?.season || key,
+      days: S.agg?.days?.length || 0, lengthDays: S.agg?.lengthDays || 28,
+      computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null,
+      leaderboards: seasonLeaderboards(S),
+    });
 
     const index = await fetchRemoteJson(`${repo}/archive-s${key}/index.json`);
     const dates = index?.days || [], dayRows = [];
