@@ -6,7 +6,7 @@ import zlib from 'node:zlib';
 
 const args = Object.fromEntries(process.argv.slice(2).map((x, i, a) => x.startsWith('--') ? [x.slice(2), a[i + 1]] : null).filter(Boolean));
 const mode = args.mode, dataDir = path.resolve(args.data || 'data'), rankedDir = path.resolve(args.ranked || dataDir), siteDir = path.resolve(args.site || '.'), outDir = path.resolve(args.out || 'out');
-if (!['daily', 'season', 'townhall'].includes(mode)) throw new Error('--mode must be daily, season, or townhall');
+if (!['daily', 'season', 'wintraders', 'townhall'].includes(mode)) throw new Error('--mode must be daily, season, wintraders, or townhall');
 const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
 const readGz = (f) => JSON.parse(zlib.gunzipSync(fs.readFileSync(f)).toString('utf8'));
 const exists = (f) => { try { fs.accessSync(f); return true; } catch { return false; } };
@@ -176,11 +176,141 @@ function buildSeasonWintraders(key, dayRows, daysExpected) {
   const leaders = [...playerTotals.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 100);
   return {
     schema: 1, kind: 'season-wintraders', season: key,
-    generatedAt: new Date().toISOString(), daysIncluded: dayRows.length, daysExpected,
+    generatedAt: new Date().toISOString(), days: dayRows.map(({ date }) => date).sort(), daysIncluded: dayRows.length, daysExpected,
     zeroStarDefenses: [...playerTotals.values()].reduce((sum, player) => sum + player.count, 0),
     suspiciousDefenses: connections.reduce((sum, pair) => sum + pair.suspiciousCount, 0),
     leaders, connections,
   };
+}
+
+function mergeSeasonWintraders(key, previous, addition, dates, daysExpected) {
+  const grouped = new Map();
+  for (const battle of [
+    ...(previous?.connections || []).flatMap((edge) => edge.battles || []),
+    ...addition.connections.flatMap((edge) => edge.battles || []),
+  ]) {
+    const pairKey = `${battle.defender.tag}|${battle.attacker.tag}`;
+    const pair = grouped.get(pairKey) || { defender: battle.defender, attacker: battle.attacker, battles: [], suspiciousCount: 0 };
+    pair.battles.push(battle);
+    if (battle.suspicious) pair.suspiciousCount++;
+    grouped.set(pairKey, pair);
+  }
+  const connections = [...grouped.values()].map((pair) => {
+    pair.battles.sort((a, b) => a.time.localeCompare(b.time));
+    const durations = pair.battles.map((battle) => battle.duration).filter((duration) => duration > 0);
+    return {
+      defender: pair.defender, attacker: pair.attacker,
+      count: pair.battles.length, suspiciousCount: pair.suspiciousCount,
+      minDuration: durations.length ? Math.min(...durations) : 0,
+      avgDuration: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : 0,
+      first: pair.battles[0].time, last: pair.battles.at(-1).time, battles: pair.battles,
+    };
+  }).sort((a, b) => b.count - a.count || a.defender.tag.localeCompare(b.defender.tag) || a.attacker.tag.localeCompare(b.attacker.tag));
+  return {
+    schema: 1, kind: 'season-wintraders', season: key,
+    generatedAt: new Date().toISOString(), days: dates, daysIncluded: dates.length, daysExpected,
+    zeroStarDefenses: (previous?.zeroStarDefenses || 0) + addition.zeroStarDefenses,
+    suspiciousDefenses: connections.reduce((sum, pair) => sum + pair.suspiciousCount, 0),
+    leaders: [], connections,
+  };
+}
+
+function seasonWintraderFlow(report) {
+  const offenses = new Map();
+  for (const edge of report.connections || []) offenses.set(edge.attacker.tag, (offenses.get(edge.attacker.tag) || 0) + edge.count);
+  const connections = (report.connections || []).filter((edge) => offenses.get(edge.attacker.tag) > 1)
+    .map(({ battles, ...edge }) => edge);
+  return {
+    schema: report.schema, kind: 'season-wintrader-flow', season: report.season,
+    daysIncluded: report.daysIncluded, daysExpected: report.daysExpected,
+    zeroStarDefenses: report.zeroStarDefenses, suspiciousDefenses: report.suspiciousDefenses,
+    repeatOffenders: new Set(connections.map((edge) => edge.attacker.tag)).size,
+    repeatLinks: connections.length, connections,
+  };
+}
+
+async function wintraders() {
+  const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
+  const repo = 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard';
+  const keys = [current, current - 1].filter((n) => n >= 0).map((n) => new Date(anchor + n * span).toISOString().slice(0, 10));
+  const available = new Set();
+  const outDirForReports = path.join(outDir, 'wintraders');
+  for (const key of keys) {
+    const base = `${repo}/archive-s${key}`;
+    const index = await fetchRemoteJson(`${base}/index.json`);
+    const dates = [...new Set(index?.days || [])].sort();
+    if (!dates.length) { console.log(`[precompute:wintraders] no archived days for ${key}`); continue; }
+
+    const reportPath = path.join(outDirForReports, `${key}.json.gz`);
+    const previous = exists(reportPath) ? readGz(reportPath) : null;
+    const previousDays = previous?.days || [];
+    const missing = previousDays.length ? dates.filter((date) => !previousDays.includes(date))
+      : previous?.daysIncluded === dates.length ? [] : dates;
+    if (previous && !missing.length && previous.daysIncluded === dates.length) {
+      if (!previous.days?.length) {
+        previous.days = dates;
+        writeGz(`wintraders/${key}.json.gz`, previous);
+        const leaderPath = path.join(outDirForReports, `${key}-leaders.json.gz`);
+        if (exists(leaderPath)) {
+          const leaders = readGz(leaderPath);
+          leaders.days = dates;
+          writeGz(`wintraders/${key}-leaders.json.gz`, leaders);
+        }
+      }
+      const flowPath = path.join(outDirForReports, `${key}-flow.json.gz`);
+      if (!exists(flowPath)) writeGz(`wintraders/${key}-flow.json.gz`, seasonWintraderFlow(previous));
+      console.log(`[precompute:wintraders] ${key}: unchanged (${dates.length} days)`);
+      available.add(key); continue;
+    }
+
+    const raw = await fetchRemoteJson(`${base}/season.json.gz`, true);
+    if (!raw) { console.log(`[precompute:wintraders] missing season aggregate ${key}`); continue; }
+    const dayRows = [];
+    for (let i = 0; i < missing.length; i += 6) {
+      const batch = missing.slice(i, i + 6);
+      const rows = await Promise.all(batch.map(async (date) => {
+        const day = await fetchRemoteJson(`${base}/days/${date}.json.gz`, true);
+        return day ? { date, day } : null;
+      }));
+      dayRows.push(...rows.filter(Boolean));
+    }
+    let flow;
+    if (previous?.days?.length) {
+      const addition = buildSeasonWintraders(key, dayRows, raw.lengthDays || 28);
+      flow = mergeSeasonWintraders(key, previous, addition, [...new Set([...previous.days, ...addition.days])].sort(), raw.lengthDays || 28);
+    } else {
+      const allRows = dayRows.length === dates.length ? dayRows : (await Promise.all(dates.map(async (date) => {
+        const existing = dayRows.find((row) => row.date === date);
+        if (existing) return existing;
+        const day = await fetchRemoteJson(`${base}/days/${date}.json.gz`, true);
+        return day ? { date, day } : null;
+      }))).filter(Boolean);
+      flow = buildSeasonWintraders(key, allRows, raw.lengthDays || 28);
+    }
+    flow.leaders = Object.entries(raw.players || {}).map(([tag, player]) => ({
+      tag: tag.startsWith('#') ? tag : `#${tag}`, name: player.n || tag, count: Number(player.dz) || 0,
+    })).filter((player) => player.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 100);
+    writeGz(`wintraders/${key}-leaders.json.gz`, { ...flow, connections: undefined });
+    writeGz(`wintraders/${key}.json.gz`, flow);
+    writeGz(`wintraders/${key}-flow.json.gz`, seasonWintraderFlow(flow));
+    console.log(`[precompute:wintraders] ${key}: processed ${flow.daysIncluded}/${flow.daysExpected} archived days (${missing.length} new)`);
+    available.add(key);
+  }
+  if (exists(outDirForReports)) {
+    for (const file of fs.readdirSync(outDirForReports)) {
+      const match = file.match(/^(\d{4}-\d\d-\d\d)\.json\.gz$/);
+      if (!match) continue;
+      available.add(match[1]);
+      const flowPath = path.join(outDirForReports, `${match[1]}-flow.json.gz`);
+      if (!exists(flowPath)) writeGz(`wintraders/${match[1]}-flow.json.gz`, seasonWintraderFlow(readGz(path.join(outDirForReports, file))));
+    }
+  }
+  const seasons = [...available].sort().reverse();
+  const manifestPath = path.join(outDirForReports, 'index.json');
+  const previousManifest = exists(manifestPath) ? readJson(manifestPath) : null;
+  if (!previousManifest || JSON.stringify(previousManifest.seasons || []) !== JSON.stringify(seasons)) {
+    writeJson('wintraders/index.json', { schema: 1, kind: 'season-wintraders-index', seasons });
+  }
 }
 
 async function season() {
@@ -200,23 +330,6 @@ async function season() {
       leaderboards: seasonLeaderboards(S),
     });
 
-    const index = await fetchRemoteJson(`${repo}/archive-s${key}/index.json`);
-    const dates = index?.days || [], dayRows = [];
-    for (let i = 0; i < dates.length; i += 6) {
-      const batch = dates.slice(i, i + 6);
-      const rows = await Promise.all(batch.map(async (date) => {
-        const day = await fetchRemoteJson(`${repo}/archive-s${key}/days/${date}.json.gz`, true);
-        return day ? { date, day } : null;
-      }));
-      dayRows.push(...rows.filter(Boolean));
-    }
-    const flow = buildSeasonWintraders(key, dayRows, raw.lengthDays || 28);
-    flow.leaders = Object.entries(raw.players || {}).map(([tag, player]) => ({
-      tag: tag.startsWith('#') ? tag : `#${tag}`, name: player.n || tag, count: Number(player.dz) || 0,
-    })).filter((player) => player.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 100);
-    writeGz(`wintraders/${key}-leaders.json.gz`, { ...flow, connections: undefined });
-    writeGz(`wintraders/${key}.json.gz`, flow);
-    console.log(`[precompute:season] ${key}: processed ${dayRows.length}/${raw.lengthDays || 28} archived battlelog days`);
   }
 }
 
@@ -252,4 +365,5 @@ async function townhall() {
 
 if (mode === 'daily') await daily();
 else if (mode === 'season') await season();
+else if (mode === 'wintraders') await wintraders();
 else await townhall();

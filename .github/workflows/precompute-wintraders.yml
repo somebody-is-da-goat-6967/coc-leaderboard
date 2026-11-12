@@ -1,0 +1,37 @@
+name: precompute-wintraders
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: computed-season-publish
+  cancel-in-progress: false
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore computed reports
+        run: |
+          URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git clone --depth 1 --branch computed-season "$URL" out || { mkdir out; git -C out init -q -b computed-season; git -C out remote add origin "$URL"; }
+      - name: Build or update archived Legend I reports
+        run: node site-compute/precompute-site-stats.mjs --mode wintraders --out out
+      - name: Publish reports
+        working-directory: out
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add wintraders
+          if git diff --cached --quiet; then
+            echo "No new archived Legend I data."
+            exit 0
+          fi
+          git commit -m "Legend I wintrader reports $(date -u +%Y-%m-%d)"
+          git push origin HEAD:computed-season

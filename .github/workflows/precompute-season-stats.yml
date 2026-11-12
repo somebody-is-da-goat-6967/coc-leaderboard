@@ -9,7 +9,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: precompute-season-stats
+  group: computed-season-publish
   cancel-in-progress: false
 jobs:
   compute:
