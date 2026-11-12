@@ -6,7 +6,7 @@
 //   ranked/<weekStart YYYY-MM-DD>/state.json last run info
 //   ranked/<weekStart>/shards/th<N>.json.gz  one file per town hall (th0 = town hall unknown):
 //       { "#TAG": { th, n: name, b: [[time, atk, stars, pct, oppTag, armyCode, type, firstSeen, duration, oppTH, oppName], ...] } }
-//   ranked/<weekStart>/wintraders.json        current-week short zero-star ranked battle links for the website
+//   ranked/<weekStart>/wintraders.json        current-week zero-star ranked battle links + under-3m suspicion flags
 //       time/firstSeen are unix seconds (time 0 = the log had no battleTime); atk 1 = attack, 0 = defense
 //   Each player record also carries the profile data fetched from /players/<tag> (profile phase):
 //       n = name, th = current town hall, lg = [leagueId, leagueName], tr = trophies, pt = unix seconds of the profile fetch
@@ -221,10 +221,9 @@ function noteCrawl(rec, added, nowSec) { // smoothed battles-per-hour; the first
   rec.lc = nowSec;
 }
 
-// A short zero-star result is only a suspicion signal. Build it from either side's
-// battlelog entry, then reconcile the two copies of the same battle when both players
-// are tracked. Requiring every recorded duration to be under 180s avoids flagging a
-// long attack just because the other side's log was incomplete or inconsistent.
+// Build every zero-star result from either side's battlelog entry, then reconcile the
+// two copies when both players are tracked. A result is suspicious only when every
+// known duration is under 180s; missing duration is retained as a non-suspicious signal.
 function buildWintraders(players, seeds, generatedAt) {
   // Read the original 9-slot shard rows as well as the enriched rows written by this
   // change. The appended opponent TH/name fields only improve labels; they are not
@@ -253,7 +252,7 @@ function buildWintraders(players, seeds, generatedAt) {
       const oppTag = String(battleField(r, 4, 'opponentTag') || '');
       const duration = Number(battleField(r, 8, 'duration')) || 0;
       const stars = Number(battleField(r, 2, 'stars'));
-      if (!at || !oppTag || oppTag === ownerTag || stars !== 0 || duration <= 0) continue;
+      if (!at || !oppTag || oppTag === ownerTag || stars !== 0) continue;
       const type = battleField(r, 6, 'type') || battleField(r, 6, 'battleType');
       if (type !== 'ranked' && type !== 'legend') continue;
 
@@ -269,30 +268,32 @@ function buildWintraders(players, seeds, generatedAt) {
         time: new Date(at * 1000).toISOString(), timestamp: at,
         attackerTag, defenderTag, attacker, defender, durations: [], types: new Set(),
       };
-      battle.durations.push(duration);
-      battle.types.add(r[6]);
+      if (duration > 0) battle.durations.push(duration);
+      battle.types.add(type);
       byBattle.set(key, battle);
     }
   }
 
   const connections = new Map();
   for (const battle of byBattle.values()) {
-    const duration = Math.max(...battle.durations);
-    if (duration >= 180) continue;
+    const duration = battle.durations.length ? Math.max(...battle.durations) : 0;
+    const suspicious = battle.durations.length > 0 && battle.durations.every((d) => d < 180);
     const key = `${battle.defenderTag}|${battle.attackerTag}`;
     const edge = connections.get(key) || {
-      defender: battle.defender, attacker: battle.attacker, battles: [],
+      defender: battle.defender, attacker: battle.attacker, battles: [], suspiciousCount: 0,
     };
-    edge.battles.push({ time: battle.time, duration, types: [...battle.types] });
+    edge.battles.push({ time: battle.time, duration, suspicious, types: [...battle.types] });
+    if (suspicious) edge.suspiciousCount++;
     connections.set(key, edge);
   }
   const edges = [...connections.values()].map((edge) => {
     edge.battles.sort((a, b) => a.time.localeCompare(b.time));
-    const durations = edge.battles.map((b) => b.duration);
+    const durations = edge.battles.map((b) => b.duration).filter((duration) => duration > 0);
     return {
       defender: edge.defender, attacker: edge.attacker,
-      count: edge.battles.length, minDuration: Math.min(...durations),
-      avgDuration: Math.round(durations.reduce((a, b) => a + b, 0) / durations.length),
+      count: edge.battles.length, suspiciousCount: edge.suspiciousCount,
+      minDuration: durations.length ? Math.min(...durations) : 0,
+      avgDuration: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0,
       first: edge.battles[0].time, last: edge.battles.at(-1).time,
       battles: edge.battles,
     };
@@ -319,7 +320,8 @@ function buildWintraders(players, seeds, generatedAt) {
     playersTracked: seeds.size,
     playersWithBattlelogs: [...tracked].filter((tag) => players.get(tag)?.lc).length,
     townHalls: [...townHalls].filter(Boolean).sort((a, b) => a - b),
-    suspectedBattles: edges.reduce((sum, edge) => sum + edge.count, 0),
+    zeroStarDefenses: edges.reduce((sum, edge) => sum + edge.count, 0),
+    suspiciousDefenses: edges.reduce((sum, edge) => sum + edge.suspiciousCount, 0),
     playersInvolved: involved.size,
     connections: edges,
     players: [...involved.values()].sort((a, b) => (b.gave + b.received) - (a.gave + a.received) || a.name.localeCompare(b.name)),
