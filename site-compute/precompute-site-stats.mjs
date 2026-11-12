@@ -36,9 +36,10 @@ const avgOf = (n, d, places = 2) => d ? fmtN(n / d, places) : '–';
 const pctOf = (n, d) => d ? `${fmtN(100 * n / d, 1)}%` : '–';
 const signed = n => `${n > 0 ? '+' : ''}${fmtN(n)}`;
 const rankOrder = (a, b) => (a.rank || 1e9) - (b.rank || 1e9);
+const SEASON_BOARD_KEEP = 100;
 
 function seasonLeaderboards(S) {
-  const rows = S.rows || [], by = (arr, cmp, value, detail) => [...arr].sort(cmp).slice(0, 10).map(r => ({
+  const rows = S.rows || [], by = (arr, cmp, value, detail) => [...arr].sort(cmp).slice(0, SEASON_BOARD_KEEP).map(r => ({
     tag: r.tag, name: r.name || r.tag, value: value(r), detail: detail(r),
   }));
   const moved = rows.filter(r => r.delta && Math.min(r.rank, r.r0) <= 2500);
