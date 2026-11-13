@@ -26,7 +26,7 @@ const OUT = process.env.OUT_DIR || 'cards-out';
 const SEASON_ANCHOR = Date.parse('2026-10-05T05:00:00Z'); // keep in sync with legend.js CONFIG and scanner/archive.mjs
 const SEASON_DAYS = 28, DAY = 864e5;
 const MIN_RATE_ATTACKS = 8;   // percentiles for rates / averages need at least this many attacks (defenses)
-const SCHEMA = 2;             // bump to force every shard to be rebuilt
+const SCHEMA = 3;             // rebuild shards after validating all per-day battle history
 const T0 = Date.now(), BUDGET_MS = (+process.env.TIME_BUDGET_MIN || 25) * 60000; // stop downloading new days after this; next run continues
 const CK_BASE = 'https://assets.clashk.ing/';
 
@@ -115,7 +115,7 @@ function favOf(p, codes, site) {
 // ---------- per-day history (each finished day is downloaded once, then kept in <key>/hist) ----------
 async function buildDayHist(key, date) {
   const dayBuf = await fetchBuf(`${RAW}/archive-s${key}/days/${date}.json.gz`);
-  if (!dayBuf) { console.warn(`  day ${date}: no day file`); return {}; }
+  if (!dayBuf) { console.warn(`  day ${date}: no day file`); return null; }
   const day = JSON.parse(gunzipMaybe(dayBuf));
   let ranks = null;
   try {
@@ -132,6 +132,13 @@ async function buildDayHist(key, date) {
     out[tag] = [(ranks && ranks.get(tag)) || 0, at.reduce((s, h) => s + trophyGain(h.stars, h.destruction), 0), df.reduce((s, h) => s + trophyGain(h.stars, h.destruction), 0), at.length, df.length];
   }
   return out;
+}
+
+function historyCounts(history) {
+  return Object.values(history || {}).reduce((sum, row) => {
+    if (Array.isArray(row)) { sum.att += +row[3] || 0; sum.def += +row[4] || 0; }
+    return sum;
+  }, { att: 0, def: 0 });
 }
 
 // ---------- percentiles with sorted arrays ----------
@@ -185,16 +192,38 @@ async function main() {
     built.push(key);
     fs.mkdirSync(histDir, { recursive: true });
 
-    // download the days we don't have yet (oldest first), within the time budget
+    const expectedByDay = new Map((agg.dayStats || []).map(d => [d.date, d]));
+    // Download missing history and repair cached days that don't contain all the battles
+    // counted by the season aggregate. A missing source file is never cached as an empty day.
     let fetched = 0;
     for (const date of days) {
       const f = path.join(histDir, `${date}.json.gz`);
-      if (fs.existsSync(f)) continue;
+      const expected = expectedByDay.get(date);
+      const cached = fs.existsSync(f) ? readGz(f, null) : null;
+      const counts = historyCounts(cached);
+      if (cached && (!expected || (counts.att === expected.att && counts.def === expected.def))) continue;
       if (Date.now() - T0 > BUDGET_MS) { console.log(`season ${key}: time budget used, remaining days continue next run`); break; }
-      const t = Date.now(); writeGz(f, await buildDayHist(key, date)); fetched++;
-      console.log(`  day ${date}: history built in ${((Date.now() - t) / 1000).toFixed(1)}s`);
+      const t = Date.now(), fresh = await buildDayHist(key, date);
+      if (fresh) {
+        const actual = historyCounts(fresh);
+        if (!expected || (actual.att === expected.att && actual.def === expected.def)) {
+          writeGz(f, fresh); fetched++;
+          console.log(`  day ${date}: history built in ${((Date.now() - t) / 1000).toFixed(1)}s`);
+        } else {
+          fs.rmSync(f, { force: true });
+          console.warn(`  day ${date}: source history is incomplete (${actual.att}/${expected.att} attacks, ${actual.def}/${expected.def} defenses); will retry`);
+        }
+      } else {
+        fs.rmSync(f, { force: true });
+        console.warn(`  day ${date}: source history unavailable; will retry`);
+      }
     }
-    const histDays = days.filter((d) => fs.existsSync(path.join(histDir, `${d}.json.gz`)));
+    const histDays = days.filter((d) => {
+      const h = readGz(path.join(histDir, `${d}.json.gz`), null), expected = expectedByDay.get(d);
+      if (!h) return false;
+      if (!expected) return true;
+      const c = historyCounts(h); return c.att === expected.att && c.def === expected.def;
+    });
     const sig = `${SCHEMA}|${site ? 'a' : 'n'}|${agg.generatedAt ?? ''}|${days.length}|${Object.keys(agg.players || {}).length}|${histDays.length}`;
     let old = null; try { old = JSON.parse(fs.readFileSync(metaFile, 'utf8')); } catch { /* first run */ }
     if (old && old.sig === sig && !fetched) { console.log(`season ${key}: unchanged (${sig})`); continue; }
