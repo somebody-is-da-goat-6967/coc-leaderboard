@@ -216,16 +216,13 @@ function mergeSeasonWintraders(key, previous, addition, dates, daysExpected) {
 }
 
 function seasonWintraderFlow(report) {
-  const offenses = new Map();
-  for (const edge of report.connections || []) offenses.set(edge.attacker.tag, (offenses.get(edge.attacker.tag) || 0) + edge.count);
-  const connections = (report.connections || []).filter((edge) => offenses.get(edge.attacker.tag) > 1)
-    .map(({ battles, ...edge }) => edge);
+  const connections = (report.connections || []).map(({ battles, ...edge }) => edge);
   return {
-    schema: report.schema, kind: 'season-wintrader-flow', season: report.season,
+    schema: report.schema, mapSchema: 2, kind: 'season-wintrader-flow', season: report.season,
     daysIncluded: report.daysIncluded, daysExpected: report.daysExpected,
     zeroStarDefenses: report.zeroStarDefenses, suspiciousDefenses: report.suspiciousDefenses,
-    repeatOffenders: new Set(connections.map((edge) => edge.attacker.tag)).size,
-    repeatLinks: connections.length, connections,
+    recipients: new Set(connections.map((edge) => edge.defender.tag)).size,
+    links: connections.length, connections,
   };
 }
 
@@ -258,7 +255,8 @@ async function wintraders() {
         }
       }
       const flowPath = path.join(outDirForReports, `${key}-flow.json.gz`);
-      if (!exists(flowPath)) writeGz(`wintraders/${key}-flow.json.gz`, seasonWintraderFlow(previous));
+      const compact = exists(flowPath) ? readGz(flowPath) : null;
+      if (compact?.mapSchema !== 2) writeGz(`wintraders/${key}-flow.json.gz`, seasonWintraderFlow(previous));
       console.log(`[precompute:wintraders] ${key}: unchanged (${dates.length} days)`);
       available.add(key); continue;
     }
@@ -302,7 +300,8 @@ async function wintraders() {
       if (!match) continue;
       available.add(match[1]);
       const flowPath = path.join(outDirForReports, `${match[1]}-flow.json.gz`);
-      if (!exists(flowPath)) writeGz(`wintraders/${match[1]}-flow.json.gz`, seasonWintraderFlow(readGz(path.join(outDirForReports, file))));
+      const compact = exists(flowPath) ? readGz(flowPath) : null;
+      if (compact?.mapSchema !== 2) writeGz(`wintraders/${match[1]}-flow.json.gz`, seasonWintraderFlow(readGz(path.join(outDirForReports, file))));
     }
   }
   const seasons = [...available].sort().reverse();
