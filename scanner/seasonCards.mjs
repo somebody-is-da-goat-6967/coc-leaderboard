@@ -26,7 +26,7 @@ const OUT = process.env.OUT_DIR || 'cards-out';
 const SEASON_ANCHOR = Date.parse('2026-10-05T05:00:00Z'); // keep in sync with legend.js CONFIG and scanner/archive.mjs
 const SEASON_DAYS = 28, DAY = 864e5;
 const MIN_RATE_ATTACKS = 8;   // percentiles for rates / averages need at least this many attacks (defenses)
-const SCHEMA = 3;             // rebuild shards after validating all per-day battle history
+const SCHEMA = 4;             // rebuild shards with complete battle and EOD history
 const T0 = Date.now(), BUDGET_MS = (+process.env.TIME_BUDGET_MIN || 25) * 60000; // stop downloading new days after this; next run continues
 const CK_BASE = 'https://assets.clashk.ing/';
 
@@ -113,25 +113,46 @@ function favOf(p, codes, site) {
 }
 
 // ---------- per-day history (each finished day is downloaded once, then kept in <key>/hist) ----------
-async function buildDayHist(key, date) {
+async function fetchEodRanks(date) {
+  const eb = await fetchBuf(`${RAW}/data/eod/${date}.json.gz`);
+  if (!eb) return null;
+  return new Map(((JSON.parse(gunzipMaybe(eb)).players) || []).map((p, i) => [normTag(p.tag), p.rank || i + 1]));
+}
+
+async function buildDayHist(key, date, wantedTags) {
   const dayBuf = await fetchBuf(`${RAW}/archive-s${key}/days/${date}.json.gz`);
   if (!dayBuf) { console.warn(`  day ${date}: no day file`); return null; }
   const day = JSON.parse(gunzipMaybe(dayBuf));
   let ranks = null;
-  try {
-    const eb = await fetchBuf(`${RAW}/data/eod/${date}.json.gz`);
-    if (eb) ranks = new Map(((JSON.parse(gunzipMaybe(eb)).players) || []).map((p, i) => [normTag(p.tag), p.rank || i + 1]));
-  } catch (e) { console.warn(`  day ${date}: eod ranks unavailable (${e.message})`); }
+  try { ranks = await fetchEodRanks(date); }
+  catch (e) { console.warn(`  day ${date}: eod ranks unavailable (${e.message})`); }
   if (!ranks) console.warn(`  day ${date}: no end-of-day ranks, rank chart will have a gap`);
   const ts = (r) => Date.parse(r.time), out = {};
+  if (ranks) for (const [tag, rank] of ranks) if (wantedTags.has(tag)) out[tag] = [rank, 0, 0, 0, 0];
   for (const [rawTag, e] of Object.entries(day.players || {})) {
     const at = [...(e.attacks || [])].sort((a, b) => ts(a) - ts(b)).slice(0, 8);
     const df = [...(e.defenses || [])].sort((a, b) => ts(a) - ts(b)).slice(0, 8);
     if (!at.length && !df.length) continue;
     const tag = normTag(rawTag);
+    if (!wantedTags.has(tag)) continue;
     out[tag] = [(ranks && ranks.get(tag)) || 0, at.reduce((s, h) => s + trophyGain(h.stars, h.destruction), 0), df.reduce((s, h) => s + trophyGain(h.stars, h.destruction), 0), at.length, df.length];
   }
+  out.__eodRanks = !!ranks;
   return out;
+}
+
+async function addEodRanks(date, history, wantedTags) {
+  try {
+    const ranks = await fetchEodRanks(date);
+    if (!ranks) return history;
+    for (const [tag, rank] of ranks) {
+      if (!wantedTags.has(tag)) continue;
+      const row = history[tag] || [0, 0, 0, 0, 0];
+      row[0] = rank; history[tag] = row;
+    }
+    history.__eodRanks = true;
+  } catch (e) { console.warn(`  day ${date}: eod ranks unavailable (${e.message})`); }
+  return history;
 }
 
 function historyCounts(history) {
@@ -193,6 +214,7 @@ async function main() {
     fs.mkdirSync(histDir, { recursive: true });
 
     const expectedByDay = new Map((agg.dayStats || []).map(d => [d.date, d]));
+    const wantedTags = new Set(Object.keys(agg.players || {}).map(normTag));
     // Download missing history and repair cached days that don't contain all the battles
     // counted by the season aggregate. A missing source file is never cached as an empty day.
     let fetched = 0;
@@ -201,9 +223,14 @@ async function main() {
       const expected = expectedByDay.get(date);
       const cached = fs.existsSync(f) ? readGz(f, null) : null;
       const counts = historyCounts(cached);
-      if (cached && (!expected || (counts.att === expected.att && counts.def === expected.def))) continue;
+      if (cached && (!expected || (counts.att === expected.att && counts.def === expected.def))) {
+        if (cached.__eodRanks) continue;
+        const enriched = await addEodRanks(date, cached, wantedTags);
+        if (enriched.__eodRanks) { writeGz(f, enriched); fetched++; }
+        continue;
+      }
       if (Date.now() - T0 > BUDGET_MS) { console.log(`season ${key}: time budget used, remaining days continue next run`); break; }
-      const t = Date.now(), fresh = await buildDayHist(key, date);
+      const t = Date.now(), fresh = await buildDayHist(key, date, wantedTags);
       if (fresh) {
         const actual = historyCounts(fresh);
         if (!expected || (actual.att === expected.att && actual.def === expected.def)) {
@@ -224,7 +251,8 @@ async function main() {
       if (!expected) return true;
       const c = historyCounts(h); return c.att === expected.att && c.def === expected.def;
     });
-    const sig = `${SCHEMA}|${site ? 'a' : 'n'}|${agg.generatedAt ?? ''}|${days.length}|${Object.keys(agg.players || {}).length}|${histDays.length}`;
+    const rankDays = days.filter(d => readGz(path.join(histDir, `${d}.json.gz`), null)?.__eodRanks);
+    const sig = `${SCHEMA}|${site ? 'a' : 'n'}|${agg.generatedAt ?? ''}|${days.length}|${Object.keys(agg.players || {}).length}|${histDays.length}|${rankDays.length}`;
     let old = null; try { old = JSON.parse(fs.readFileSync(metaFile, 'utf8')); } catch { /* first run */ }
     if (old && old.sig === sig && !fetched) { console.log(`season ${key}: unchanged (${sig})`); continue; }
 
@@ -233,8 +261,8 @@ async function main() {
     for (const f of fs.readdirSync(dir)) if (/^[0-9A-Z_]{2}\.json$/.test(f)) fs.rmSync(path.join(dir, f)); // old shards only; keep hist/
     const head = { season: agg.season, days: days.length, dayList: days, lengthDays: agg.lengthDays || SEASON_DAYS, generatedAt: agg.generatedAt || null };
     for (const [k, players] of shards) fs.writeFileSync(path.join(dir, `${k}.json`), JSON.stringify({ ...head, players }));
-    fs.writeFileSync(metaFile, JSON.stringify({ sig, season: agg.season, days: days.length, histDays: histDays.length, lengthDays: head.lengthDays, generatedAt: head.generatedAt, players: count, shards: shards.size, built: new Date().toISOString() }));
-    console.log(`season ${key}: ${count} players in ${shards.size} shards (${histDays.length}/${days.length} days of history)`);
+    fs.writeFileSync(metaFile, JSON.stringify({ sig, season: agg.season, days: days.length, histDays: histDays.length, rankDays: rankDays.length, lengthDays: head.lengthDays, generatedAt: head.generatedAt, players: count, shards: shards.size, built: new Date().toISOString() }));
+    console.log(`season ${key}: ${count} players in ${shards.size} shards (${histDays.length}/${days.length} battle days, ${rankDays.length}/${days.length} EOD rank days)`);
     changed = true;
   }
   for (const d of fs.readdirSync(OUT)) { // drop seasons that are no longer current/previous
