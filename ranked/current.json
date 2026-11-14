@@ -1,0 +1,37 @@
+{
+ "weekKey": "2026-11-09",
+ "start": "2026-11-09T17:00:00.000Z",
+ "end": "2026-11-15T05:00:00.000Z",
+ "updatedAt": "2026-11-14T13:14:11.364Z",
+ "mode": "trophies",
+ "tagsInSeed": 66044,
+ "crawledThisRun": 1683,
+ "failedThisRun": 0,
+ "logsDueAtStart": 1683,
+ "groupsDueAtStart": 35804,
+ "groupsNeverFetchedAtStart": 0,
+ "profilesDueAtStart": 6450,
+ "incompleteAtStart": 27,
+ "incompleteLeft": 27,
+ "apiErrors": {
+  "leaguegroup:520": 1
+ },
+ "apiErrorSamples": {
+  "leaguegroup:520": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/\",\"title\":\"Error 520: Web server is returning an unknown error\",\"status\":520,\"detail\":\"The origin web server sent a response that Cloudflare could not parse. This may indicate the ori"
+ },
+ "gapsThisRun": 0,
+ "groupsThisRun": 11277,
+ "groupMembersUpdated": 15804,
+ "profilesThisRun": 3210,
+ "callsUsed": 16200,
+ "callBudget": 16200,
+ "playersTracked": 66044,
+ "playersWithBattles": 62107,
+ "playersWithLeague": 66017,
+ "playersWithGroupData": 46467,
+ "battles": 1610019,
+ "battleTypesSeen": {
+  "homevillage": 46016,
+  "ranked": 29736
+ }
+}
