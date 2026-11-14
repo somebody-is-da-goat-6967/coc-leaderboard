@@ -1,0 +1,78 @@
+{
+ "date": "2026-10-31",
+ "players": 11581,
+ "attacks": 89337,
+ "defenses": 89349,
+ "perfectDays": 106,
+ "zeroStarDefenses": 321,
+ "tripleRate": 0.4322621086447944,
+ "shielded": 2250,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+138",
+   "name": "☪️ MUSLIM ☪️",
+   "tag": "YVQUR0Y22",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:09",
+   "name": "아아아아",
+   "tag": "GYYP800UC",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−147",
+   "name": "༆ᴺᴼᴼᴮ㋡Aʙʜɪ❓",
+   "tag": "28VP0UUV0",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Hąssąn",
+   "tag": "JPYGJ028",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 10,447",
+   "name": "미역국",
+   "tag": "2JLY0P2U0",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+4,266",
+   "name": "Kyber",
+   "tag": "LC02PVVPR",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "✨☠️✨VANSH✨☠️✨",
+   "tag": "Y8V9YYP9C",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Duke Charge (Fox) + Dragon Riders",
+  "players": 206,
+  "attacks": 1583,
+  "tripleRate": 0.5344283006948831,
+  "avgStars": 2.450410612760581,
+  "code": "h2m1p16e4_34-4p4e6_13-6p17e43_49-7p10e52_59i1x5-2x65d1x70-1x98u1x17-8x65-3x63-1x23-7x57-1x6-1x10-1x0-4x1-1x188s2x5-1x9-6x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2435,
+  "share": 0.21558211598052235
+ }
+}

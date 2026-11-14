@@ -1,0 +1,78 @@
+{
+ "date": "2026-10-29",
+ "players": 11781,
+ "attacks": 92075,
+ "defenses": 92081,
+ "perfectDays": 72,
+ "zeroStarDefenses": 343,
+ "tripleRate": 0.4325604127070323,
+ "shielded": 2062,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+134",
+   "name": "Puma b LP⚜️",
+   "tag": "8C2GLPCCG",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:13",
+   "name": "玩家",
+   "tag": "G2PQC9GUY",
+   "tied": 1
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−147",
+   "name": "GAMKONORA.",
+   "tag": "U2Y2R8GV",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Clasher",
+   "tag": "2CP0V029",
+   "tied": 4
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,600",
+   "name": "fashya",
+   "tag": "8PYVL2PLJ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,039",
+   "name": "18 лет уже 20см",
+   "tag": "LG8G0VJRL",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "りったん",
+   "tag": "8VV8JURC9",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + Dragon Riders",
+  "players": 51,
+  "attacks": 397,
+  "tripleRate": 0.5969773299748111,
+  "avgStars": 2.5415617128463475,
+  "code": "h1p9e48_17-2m1p16e4_34-6p4e49_43-7p11e53_52i1x5-2x65d1x70-1x98u1x17-9x65-3x63-1x23-4x57-2x10-2x0-4x1-1x188s2x5-1x9-5x10-3x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2535,
+  "share": 0.2186664366428017
+ }
+}

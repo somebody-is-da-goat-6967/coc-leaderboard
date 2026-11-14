@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-09",
+ "players": 11363,
+ "attacks": 87893,
+ "defenses": 87875,
+ "perfectDays": 120,
+ "zeroStarDefenses": 256,
+ "tripleRate": 0.4479765169012322,
+ "shielded": 2346,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+148",
+   "name": "TYG♨️༄°我是Mɪɴɪ™࿐",
+   "tag": "22PUPY908",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:07",
+   "name": "Jr다이버707",
+   "tag": "GLQ8G0CU",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−161",
+   "name": "Gojo・六",
+   "tag": "8LC880Q2V",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "mortada kn",
+   "tag": "PYJ8QUVQR",
+   "tied": 1
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,234",
+   "name": "Artemida-|我|•",
+   "tag": "8UVLYP2VG",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+2,871",
+   "name": "muxa",
+   "tag": "280PVL0G",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+56",
+   "name": "最強 Lancelot",
+   "tag": "PVR9LY9JG",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Duke Charge (Fox) + Dragon Riders",
+  "players": 200,
+  "attacks": 1501,
+  "tripleRate": 0.5562958027981346,
+  "avgStars": 2.4890073284477015,
+  "code": "h2m1p16e4_34-4p4e6_13-6p17e43_49-7p10e52_59i1x5-2x65d1x70-1x98u1x17-8x65-3x63-1x23-7x57-1x6-1x10-2x0-3x1-1x188s2x5-1x9-6x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2436,
+  "share": 0.21601489757914338
+ }
+}

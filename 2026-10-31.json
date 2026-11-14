@@ -1,0 +1,78 @@
+{
+ "date": "2026-10-30",
+ "players": 11717,
+ "attacks": 90959,
+ "defenses": 90984,
+ "perfectDays": 94,
+ "zeroStarDefenses": 297,
+ "tripleRate": 0.4295231917677195,
+ "shielded": 2120,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+149",
+   "name": "EZ⚡️Chepper⚡️",
+   "tag": "LURR922JY",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "0:59",
+   "name": "RAMBO",
+   "tag": "PC9YRJY2P",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−128",
+   "name": "Devil May Cry",
+   "tag": "2UUVVVUQG",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Kssss",
+   "tag": "QU92C8GLR",
+   "tied": 1
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 3,035",
+   "name": "少伏羲",
+   "tag": "QY8JYCV2G",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,070",
+   "name": "江上✨叶落",
+   "tag": "8RLGLRLUG",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+64",
+   "name": "Ｆｅｒｎ❀",
+   "tag": "88R8RUCUU",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + Dragon Riders",
+  "players": 54,
+  "attacks": 421,
+  "tripleRate": 0.5463182897862233,
+  "avgStars": 2.451306413301663,
+  "code": "h1p9e48_17-2m1p16e4_34-6p4e49_43-7p11e53_52i1x188-1x5-2x65d1x70-1x98u1x17-9x65-3x63-1x23-4x57-2x10-2x0-4x1s2x5-1x9-5x10-3x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2494,
+  "share": 0.21722846441947566
+ }
+}
