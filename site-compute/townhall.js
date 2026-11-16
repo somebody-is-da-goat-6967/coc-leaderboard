@@ -79,11 +79,11 @@ const defTrophies = (stars, pct) => (stars >= 3 ? 0 : stars <= 0 ? 40 : 40 - atk
 
 // ---------- statistics ----------
 async function rkCompute(sets, week, onProg, cancelled) {
-  const mk = () => ({ players: 0, att: 0, def: 0, st: 0, s3: 0, pct: 0, dz: 0, dsum: 0, dur: 0, durN: 0, withCode: 0, noCode: 0,
+  const mk = () => ({ tracked: 0, players: 0, att: 0, def: 0, st: 0, s3: 0, pct: 0, dz: 0, dsum: 0, dur: 0, durN: 0, withCode: 0, noCode: 0,
     duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0 })), comp: new Map(), hero: new Map(), opener: new Map(), strat: new Map(),
     siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 }, armies: new Map(), troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
   const B = Array.from({ length: RKN + 1 }, mk);
-  const G = { locked: 0, players: 0, active: 0, att: 0, def: 0, st: 0, pct: 0, dur: 0, durN: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0],
+  const G = { tracked: 0, locked: 0, players: 0, active: 0, att: 0, def: 0, st: 0, pct: 0, dur: 0, durN: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0],
     days: Array.from({ length: 7 }, () => ({ n: 0, st: 0, s3: 0 })),
     dur6: Array.from({ length: 6 }, () => [0, 0]), per: Array(PER_BINS.length).fill(0) };
   const rows = [], fast = [], lgRows = [], leagueProfiles = new Map();
@@ -99,12 +99,14 @@ async function rkCompute(sets, week, onProg, cancelled) {
     for (const [tag0, rec] of Object.entries(raw)) {
       if (++pi % 150 === 0) { onProg(pi / total); await new Promise((r) => setTimeout(r, 0)); if (cancelled()) return null; }
       const tag = normTag(tag0), name = rec.n || '#' + tag, att = [], def = [];
+      G.tracked++; targets.forEach((t) => t.tracked++);
+
       // Town hall image counts use every tracked profile with a league, whether or not they joined this ranked week.
       // Keep lgRows separate: the in-page ranked league leaderboard still requires this week's league group (rec.gf).
       if (rec.lg && rec.lg[1]) leagueProfiles.set(tag, { tag, th: rec.th || th, lid: rec.lg[0] || 0, ln: rec.lg[1] });
       let ix = 0;
       for (const r of rec.b || []) {
-        const h = { ix: ix++, ts: (r[0] || r[7] || 0) * 1000, hasTime: !!r[0], time: r[8] || 0, tag: r[4] || '', code: r[5] || '', stars: r[2] || 0, pct: r[3] || 0 };
+        const h = { ix: ix++, ts: (r[0] || r[7] || 0) * 1000, hasTime: !!r[0], time: r[8] || 0, tag: r[4] || '', code: r[5] || '', stars: Math.max(0, Math.min(3, +r[2] || 0)), pct: +r[3] || 0 };
         (r[1] ? att : def).push(h);
       }
       // A ranked week allows only a fixed number of attacks (6–30 depending on league), so anything beyond that is left over from an earlier week's log. Keep the newest
@@ -120,9 +122,9 @@ async function rkCompute(sets, week, onProg, cancelled) {
       def.sort((x, y) => x.ts - y.ts || y.ix - x.ix);
       if (def.length > gwD) def.splice(0, def.length - gwD);
       if (rec.lg && rec.gf) lgRows.push({ tag, name, th: rec.th || th, lid: rec.lg[0] || 0, ln: rec.lg[1] || 'Unranked', tr: rec.tr || 0, na: att.length, mx: mxA, ga: rec.gw ? rec.gw[0] + rec.gw[1] : null, gr: rec.gr || 0 }); // trophies only count once this week's league group was read
-      if (!att.length && !def.length) continue;
+
       const row = { tag, name, th: rec.th || th, na: att.length, nd: def.length, st: 0, s3: 0, pct: 0, dz: 0, dst: 0, d3: 0, ot: 0, dt: 0 };
-      G.players++; targets.forEach((t) => t.players++);
+      if (att.length || def.length) { G.players++; targets.forEach((t) => t.players++); }
       if (att.length >= RK.MIN_ATK) G.active++;
       if (att.length) G.per[PER_BINS.findIndex(([a, b]) => att.length >= a && att.length <= b)]++;
       const myArmy = new Map(); // code -> [uses, stars, 3stars, destruction, seconds]
@@ -182,7 +184,7 @@ async function rkCompute(sets, week, onProg, cancelled) {
       rows.push(row);
     }
   }
-  return { B, G, rows, fast, lg: lgRows, leagueProfiles: [...leagueProfiles.values()], week, multi: sets.filter((s) => s.th >= RK.MIN && s.th <= RK.MAX).length > 1,
+  return { B, G, rows, fast, lg: lgRows, leagueProfiles: [...leagueProfiles.values()], tracked: G.tracked, week, multi: sets.filter((s) => s.th >= RK.MIN && s.th <= RK.MAX).length > 1,
     names: new Map(rows.map((r) => [r.tag, r.name])) };
 }
 
@@ -705,7 +707,7 @@ async function rkCardRender(d, cv, load = rkcLoad) {
   // at a glance
   const GX = solo ? M : M + LW + GAP; rkcPanel(c, GX, MY, RW, MH, 'rgba(255,255,255,.06)', 'rgba(255,255,255,.16)', 24);
   rkcText(c, `${thLabel} AT A GLANCE`, GX + pd, MY + 42, 20, C.gold);
-  const kp = [[fmtN(G.players), 'PLAYERS', '#fff'], [fmtN(G.att), 'ATTACKS', '#fff'], [rkcPct(gS3, G.att), '3★ RATE', C.green], [rkcAvg(G.st, G.att), '★ / ATTACK', '#fff'], [`${rkcAvg(G.pct, G.att, 1)}%`, 'DESTRUCTION', '#fff']];
+  const kp = [[fmtN(G.players), 'ACTIVE PLAYERS', '#fff'], [fmtN(G.att), 'ATTACKS', '#fff'], [rkcPct(gS3, G.att), '3★ RATE', C.green], [rkcAvg(G.st, G.att), '★ / ATTACK', '#fff'], [`${rkcAvg(G.pct, G.att, 1)}%`, 'DESTRUCTION', '#fff']];
   const kw = (RW - 2 * pd) / kp.length;
   kp.forEach(([v, l, col], i) => { const x = GX + pd + i * kw; rkcText(c, v, x, MY + 96, 36, col, { maxW: kw - 18, min: 22 }); rkcText(c, l, x, MY + 120, 13, C.dim, { maxW: kw - 10 }); });
   c.strokeStyle = 'rgba(255,255,255,.12)'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(GX + pd, MY + 138); c.lineTo(GX + RW - pd, MY + 138); c.stroke();

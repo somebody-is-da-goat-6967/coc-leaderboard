@@ -160,7 +160,10 @@ function applyProfile(rec, p, nowSec) {
   if (p.name) rec.n = p.name;
   if (p.townHallLevel) rec.th = p.townHallLevel;
   const lg = p.leagueTier || p.league;
-  rec.lg = lg && lg.id != null ? [lg.id, lg.name || ''] : [0, 'Unranked'];
+  const nextLeague = lg && lg.id != null ? [lg.id, lg.name || ''] : [0, 'Unranked'];
+  // League placement is fixed for this tournament week. Keep the first valid
+  // league captured in this week's shard, even if the live profile later changes.
+  if (!Array.isArray(rec.lg) || (!Number(rec.lg[0]) && Number(nextLeague[0]))) rec.lg = nextLeague;
   if (!rec.gf) rec.tr = p.trophies ?? 0; // until the league group gives the real weekly ranked trophies
   if (p.currentLeagueGroupTag && p.currentLeagueSeasonId) rec.cg = [p.currentLeagueGroupTag, p.currentLeagueSeasonId];
   if (p.previousLeagueGroupTag && p.previousLeagueSeasonId) rec.pg = [p.previousLeagueGroupTag, p.previousLeagueSeasonId];

@@ -51,11 +51,11 @@ jobs:
           MAX_RPS: 20                                   # this key is used by the ranked crawl only; raise if current.json shows no 429s
           NODE_OPTIONS: --max-old-space-size=4096
         run: node scanner/ranked-crawl.mjs
-      - name: Archive finished weeks (one branch per week; ranked-data keeps current + previous, archive keeps the newest 2)
+      - name: Archive finished weeks (one branch per week; keep six weeks of ranked data)
         continue-on-error: true
         working-directory: data-out
         env:
-          KEEP_ARCHIVES: 2          # 2 on ranked-data + 2 archive branches = 4 weeks total
+          KEEP_ARCHIVES: 4          # 2 on ranked-data + 4 archive branches = 6 weeks total
         run: |
           URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           for d in $(ls -d ranked/20* 2>/dev/null | sort | head -n -2); do
