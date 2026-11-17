@@ -2,21 +2,34 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [sourceArg, targetArg] = process.argv.slice(2);
-if (!sourceArg || !targetArg) throw new Error('Usage: node scripts/sync-site-sources.mjs <website-checkout> <crawler-checkout>');
-const source = path.resolve(sourceArg), target = path.resolve(targetArg);
+const [targetArg = '.', sourceArg] = process.argv.slice(2);
+const target = path.resolve(targetArg);
+const source = path.resolve(sourceArg || path.join(target, 'site-source'));
+const base = 'https://legendstats.pages.dev/';
+const files = ['armyids.js', 'army.js', 'legend.js', 'stats.js', 'season.js', 'townhall.js'];
+const downloaded = new Map();
+for (const file of files) {
+  const response = await fetch(new URL(file, base), { signal: AbortSignal.timeout(30000) });
+  if (!response.ok) throw new Error(`Could not fetch ${file} from live site (HTTP ${response.status})`);
+  const text = await response.text();
+  if (!text.trim() || /^\s*<!doctype html/i.test(text)) throw new Error(`Live site did not return JavaScript for ${file}`);
+  downloaded.set(file, text);
+}
+if (!downloaded.get('armyids.js').includes('const ARMY_IDS =')) throw new Error('Live armyids.js did not contain the expected ID table');
+
+fs.mkdirSync(source, { recursive: true });
+for (const [file, text] of downloaded) fs.writeFileSync(path.join(source, file), text);
 const copies = {
   '.': ['armyids.js', 'army.js', 'legend.js', 'stats.js'],
   scanner: ['armyids.js', 'army.js', 'stats.js'],
-  'site-compute': ['armyids.js', 'army.js', 'legend.js', 'stats.js', 'season.js', 'townhall.js'],
+  'site-compute': files,
 };
-for (const [dir, files] of Object.entries(copies)) {
+for (const [dir, names] of Object.entries(copies)) {
   const outDir = path.join(target, dir);
   fs.mkdirSync(outDir, { recursive: true });
-  for (const file of files) {
-    const from = path.join(source, file), to = path.join(outDir, file);
-    if (!fs.existsSync(from)) throw new Error(`Website source is missing ${file}`);
-    fs.copyFileSync(from, to);
-    console.log(`[site-sync] ${path.relative(target, to)}`);
+  for (const file of names) {
+    fs.copyFileSync(path.join(source, file), path.join(outDir, file));
+    console.log(`[site-sync] ${path.relative(target, path.join(outDir, file))}`);
   }
 }
+console.log(`[site-sync] source ${base}`);

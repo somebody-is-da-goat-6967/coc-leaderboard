@@ -15,16 +15,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: crawler
-      - uses: actions/checkout@v4
-        with:
-          repository: somebody-is-da-goat-6967/website
-          ref: main
-          path: website-source
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Sync the website decoder and stats code
-        run: node crawler/scripts/sync-site-sources.mjs website-source crawler
+      - name: Sync the live website decoder and stats code
+        run: node crawler/scripts/sync-site-sources.mjs crawler
       - name: Publish source updates
         working-directory: crawler
         run: |
