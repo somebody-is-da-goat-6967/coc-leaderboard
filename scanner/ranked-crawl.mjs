@@ -34,6 +34,7 @@ const API_BASE = (env.COC_API_BASE || 'https://cocproxy.royaleapi.dev/v1').repla
 const API_KEY = env.COC_API_KEY_RANKED || env.COC_API_KEY; // the ranked crawl has its own key
 const SEED_FILE = env.SEED_FILE || 'seeds/clashspot-townhall-tags.json';
 const LEGEND_SEED_FILE = env.LEGEND_SEED_FILE || '';
+const LEGEND_SEEDS = new Set();
 const OUT = env.DATA_DIR || 'data-out';
 const CONCURRENCY = Number(env.CONCURRENCY) || 25;
 const MAX_MINUTES = Number(env.MAX_MINUTES) || 100;
@@ -46,6 +47,7 @@ const PROFILE_TTL_MIN = Number(env.PROFILE_TTL_MIN) || 360;   // league name / t
 const GROUP_TTL_MIN = Number(env.GROUP_TTL_MIN) || (MODE === 'battlelogs' ? 120 : 25); // don't refetch a league group younger than this
 const envShare = (n) => (env[n] != null && env[n] !== '' ? Number(env[n]) : null);
 const BATTLE_TYPES = (env.BATTLE_TYPES || 'ranked,legend').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const isLegendOne = (league) => Number(league?.[0]) === 105000036 || /^legend(?:\s+league)?\s*(?:i|1)$/i.test(String(league?.[1] || '').trim());
 
 // Tournament week window (UTC). dow: 0=Sunday ... 6=Saturday.
 const START_DOW = Number(env.WEEK_START_DOW ?? 1), START_HOUR = Number(env.WEEK_START_HOUR ?? 17); // Monday 17:00
@@ -96,6 +98,7 @@ function loadSeeds() {
     for (const player of roster.players || []) {
       if (!player.tag) continue;
       const tag = norm(player.tag);
+      LEGEND_SEEDS.add(tag);
       if (!map.has(tag)) map.set(tag, null);
     }
   }
@@ -172,6 +175,7 @@ function applyProfile(rec, p, nowSec) {
   if (p.townHallLevel) rec.th = p.townHallLevel;
   const lg = p.leagueTier || p.league;
   const nextLeague = lg && lg.id != null ? [lg.id, lg.name || ''] : [0, 'Unranked'];
+  rec.liveLeague = nextLeague; // latest /players leagueTier; `lg` below remains fixed for this ranked week
   // League placement is fixed for this tournament week. Keep the first valid
   // league captured in this week's shard, even if the live profile later changes.
   if (!Array.isArray(rec.lg) || (!Number(rec.lg[0]) && Number(nextLeague[0]))) rec.lg = nextLeague;
@@ -372,7 +376,7 @@ const mxOf = (tag) => maxAtkOf(players.get(tag)?.lg?.[1]);
 const logJobs = tags.map((tag) => ({ tag, u: urgency(players.get(tag), nowSec), mx: mxOf(tag) })).filter((j) => j.u >= 1)
   .sort((a, b) => b.u - a.u || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
 // profiles: first anyone never profiled or still holding last week's group tag, then the stalest (players with no group tag just follow the TTL)
-const profJobs = tags.map((tag) => { const r = players.get(tag); return { tag, need: !r?.pt || (r.cg && !isThisWeek(r.cg[1])) ? 1 : 0, age: nowSec - (r?.pt || 0), mx: mxOf(tag) }; })
+const profJobs = tags.map((tag) => { const r = players.get(tag); return { tag, need: !r?.pt || (r.cg && !isThisWeek(r.cg[1])) || (LEGEND_SEEDS.has(tag) && !isLegendOne(r.liveLeague)) ? 1 : 0, age: nowSec - (r?.pt || 0), mx: mxOf(tag) }; })
   .filter((j) => j.need || j.age >= PROFILE_TTL_MIN * 60).sort((a, b) => b.need - a.need || b.age - a.age || b.mx - a.mx || (a.tag < b.tag ? -1 : 1));
 // league groups of the tracked players (one call serves every tracked member of a group); never-fetched groups first, then stalest
 function buildGroupJobs() {
