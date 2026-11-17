@@ -3,6 +3,11 @@ const BUILD = 'build 16 (season page)';
 const CONFIG = {
   DATA_URL: 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard/data',
   REPO_RAW: 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard', // season data lives on branches archive-sYYYY-MM-DD/season.json.gz
+  COMPUTED_URL: {
+    daily: 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard/computed-daily',
+    season: 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard/computed-season',
+    townhall: 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard/computed-townhall',
+  },
   SEASON_ANCHOR: '2026-10-05T05:00:00Z', SEASON_DAYS: 28, // keep in sync with scanner/archive.mjs
   API: '/api', // Pages Function -> RoyaleAPI proxy (see functions/api). Only used when a player is opened.
   PAGE_SIZE: 50, REFRESH_MS: 5 * 60 * 1000, DAY: 864e5, LIVE_TTL: 2 * 60 * 1000,
@@ -10,6 +15,21 @@ const CONFIG = {
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const normTag = (t) => String(t || '').replace(/^#/, '').toUpperCase();
+const isLegendOneLeague = (name) => {
+  const normalized = String(name || '').toLowerCase().replace(/\bleague\b/g, '').replace(/\s+/g, ' ').trim();
+  return ['legend', 'legend i', 'legend 1'].includes(normalized);
+};
+// ---- World Champions: these players get a crown next to their name (hover it on the site for the label) ----
+// Per town hall: tags (any case, # optional) and the names listed on that town hall's images.
+const WORLD_CHAMPS = {
+  15: { tags: ['GR22802VG', '8JCLJLVLQ', 'LG22JCPJ2'], names: ['Amoo', 'Polarisation', 'ASL'] },
+  12: { tags: ['8PY9GRYCV', 'R8JRUY2U8', '298QLG288'], names: ['Pushap', 'Rahul', 'Himank'] },
+  9:  { tags: ['GRC9JY00R', 'L80882GLG'], names: ['Excosist', 'eVe MAXI'] },
+};
+const champTh = (tag) => { const t = normTag(tag); for (const [th, c] of Object.entries(WORLD_CHAMPS)) if (c.tags.includes(t)) return +th; return 0; };
+const isChamp = (tag) => champTh(tag) > 0;
+const champLabel = (th) => `TH${th} World Champions`;
+const crown = (tag) => { const th = champTh(tag); return th ? `<span class="crown" title="${champLabel(th)}" aria-label="${champLabel(th)}" style="cursor:help;margin-left:4px">👑</span>` : ''; };
 const isTag = (s) => /^#?[0289PYLQGRJCUV]{3,15}$/i.test(s.trim());
 
 async function getJson(name) {
@@ -22,6 +42,26 @@ async function getGz(name, bust) {
   if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
   return JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text());
 }
+function reviveComputed(v) {
+  if (!v || typeof v !== 'object') return v;
+  if (v.__computedType === 'Map') return new Map(v.entries.map(([k, x]) => [reviveComputed(k), reviveComputed(x)]));
+  if (v.__computedType === 'Set') return new Set(v.values.map(reviveComputed));
+  if (Array.isArray(v)) return v.map(reviveComputed);
+  for (const k of Object.keys(v)) v[k] = reviveComputed(v[k]);
+  return v;
+}
+async function getComputed(kind, path) {
+  const base = CONFIG.COMPUTED_URL[kind];
+  if (!base) throw new Error(`Unknown computed stats set: ${kind}`);
+  const r = await fetch(`${base}/${path}?t=${Date.now()}`);
+  if (!r.ok) throw new Error(`Precomputed ${kind} stats unavailable (${r.status})`);
+  const raw = JSON.parse(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text());
+  return reviveComputed(raw);
+}
+const ageLabel = (ts) => {
+  const n = typeof ts === 'string' ? Date.parse(ts) : Number(ts);
+  return Number.isFinite(n) && n > 0 ? ago(n) : 'unknown age';
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const onFile = typeof location !== 'undefined' && location.protocol === 'file:';
 async function api(path, tries = 3) {
@@ -108,7 +148,7 @@ const getDay = (tag, back = 0) => getDayData(back).then((dd) => dayFromData(dd, 
 const fmt = (n) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString();
 const cls = (n) => (n > 0 ? 'pos' : n < 0 ? 'neg' : '');
 const nameLink = (h) => h.tag
-  ? `<a class="pl" href="player.html?tag=${esc(normTag(h.tag))}" data-tag="${esc(normTag(h.tag))}">${esc(h.name)}</a>` : esc(h.name);
+  ? `<a class="pl" href="player.html?tag=${esc(normTag(h.tag))}" data-tag="${esc(normTag(h.tag))}">${esc(h.name)}</a>${crown(h.tag)}` : esc(h.name);
 const dur = (s) => { const n = s == null || s === '' ? NaN : Number(s); return Number.isFinite(n) ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}` : '–'; };
 const ago = (ts) => {
   const m = Math.floor((Date.now() - ts) / 60000);
@@ -176,6 +216,14 @@ async function getEodInfo(start) { // { date, ranks: Map(tag -> eod rank) } for 
   const date = dates.includes(want) ? want : end > Date.now() ? dates[dates.length - 1] : null;
   return date ? { date, ranks: await eodRanks(date) } : null;
 }
+// Season of an end-of-day snapshot: eod/<date> closes the Legend Day that began 24h earlier, so that day decides the season.
+const eodSeasonIdx = (date) => Math.floor((Date.parse(date + 'T05:00:00Z') - CONFIG.DAY - Date.parse(CONFIG.SEASON_ANCHOR)) / (CONFIG.SEASON_DAYS * CONFIG.DAY));
+// Ranks of the snapshot before `date`, but only if it is from the SAME season. Trophies reset to 5,000 at a season change,
+// so comparing day 1 of a season with the last day of the previous one gives meaningless climbers/drops -> null instead.
+async function getPrevEodRanks(date) {
+  const ds = (await getMeta()).endOfDayDates || [], i = ds.indexOf(date);
+  return i > 0 && eodSeasonIdx(ds[i - 1]) === eodSeasonIdx(date) ? eodRanks(ds[i - 1]) : null;
+}
 async function getEodRank(tag, start) {
   const info = await getEodInfo(start), rank = info && info.ranks.get(normTag(tag));
   return rank ? { rank, date: info.date } : null;
@@ -191,7 +239,7 @@ async function profileHTML(tag, { back = 0, rank, note, onUpdate } = {}) {
   const ranks = eodInfo && eodInfo.ranks, own = ranks && ranks.get(normTag(tag)), eod = own ? { rank: own, date: eodInfo.date } : null;
   const render = (p, day, nt) => {
     const pid = registerProfile({ p, day, back, rank, eod, ranks, start }); // for "Download image"
-    return `<div class="ph"><h2>${esc(p.name)}${eod ? ` <span class="eod" title="${esc(eodTitle(eod))}">eod: #${eod.rank.toLocaleString()}</span>` : ''}</h2>
+    return `<div class="ph"><h2>${esc(p.name)}${crown(p.tag)}${eod ? ` <span class="eod" title="${esc(eodTitle(eod))}">eod: #${eod.rank.toLocaleString()}</span>` : ''}</h2>
     <p>#${esc(normTag(p.tag))} · ${(p.trophies ?? 0).toLocaleString()} 🏆${rank ? ` · global rank #${rank}` : ''}${p._repo && !p.townHallLevel ? '' : ` · TH${p.townHallLevel ?? '?'}`}</p>
     ${p._repo && !p.clan ? '' : `<p>${esc(p.clan?.name || 'No clan')}</p>`}
     <p><button class="btn dl" data-pid="${pid}" title="Save this Legend Day as a PNG">⬇ Download image</button></p></div>${dayHTML(day, ranks)}${nt ? `<p class="sub">${nt}</p>` : ''}`;

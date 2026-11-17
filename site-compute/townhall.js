@@ -100,7 +100,6 @@ async function rkCompute(sets, week, onProg, cancelled) {
       if (++pi % 150 === 0) { onProg(pi / total); await new Promise((r) => setTimeout(r, 0)); if (cancelled()) return null; }
       const tag = normTag(tag0), name = rec.n || '#' + tag, att = [], def = [];
       G.tracked++; targets.forEach((t) => t.tracked++);
-
       // Town hall image counts use every tracked profile with a league, whether or not they joined this ranked week.
       // Keep lgRows separate: the in-page ranked league leaderboard still requires this week's league group (rec.gf).
       if (rec.lg && rec.lg[1]) leagueProfiles.set(tag, { tag, th: rec.th || th, lid: rec.lg[0] || 0, ln: rec.lg[1] });
@@ -122,7 +121,6 @@ async function rkCompute(sets, week, onProg, cancelled) {
       def.sort((x, y) => x.ts - y.ts || y.ix - x.ix);
       if (def.length > gwD) def.splice(0, def.length - gwD);
       if (rec.lg && rec.gf) lgRows.push({ tag, name, th: rec.th || th, lid: rec.lg[0] || 0, ln: rec.lg[1] || 'Unranked', tr: rec.tr || 0, na: att.length, mx: mxA, ga: rec.gw ? rec.gw[0] + rec.gw[1] : null, gr: rec.gr || 0 }); // trophies only count once this week's league group was read
-
       const row = { tag, name, th: rec.th || th, na: att.length, nd: def.length, st: 0, s3: 0, pct: 0, dz: 0, dst: 0, d3: 0, ot: 0, dt: 0 };
       if (att.length || def.length) { G.players++; targets.forEach((t) => t.players++); }
       if (att.length >= RK.MIN_ATK) G.active++;
@@ -340,7 +338,7 @@ function rkArmies(S, sel, sort) {
   const base = t.duke[0].n + t.duke[1].n;
   return `<h2 class="sh">Top armies by town hall</h2><section class="panel">
     <div class="controls">${rkTabs(S, sel)}<div class="seg" id="sseg" role="group" aria-label="Sort armies">${Object.entries(RK_SORTS).map(([k, v]) => `<button data-s="${k}" aria-pressed="${k === sort}">${v}</button>`).join('')}</div></div>
-    <p class="sub">${fmtN(t.withCode)} ${gname} players, one preferred army family each. Similar troop recipes are grouped by strategic core; counts, support troops, siege, spells, heroes, pets and equipment variations stay together. Each card shows the most-used recipe, with other versions in its variations. Card numbers show average stars, 3★ rate, average destruction and battle time.${sort === 'used' ? '' : ' Performance sorts require a minimum player sample and 10+ attacks.'}</p>
+    <p class="sub">${fmtN(t.withCode)} ${gname} players, one preferred army family each. Similar troop recipes are grouped by strategic core; counts, support troops, squads, siege, spells, heroes, pets and equipment variations stay together. The breakdown below lists squads separately from regular troops and siege. Each card shows the most-used recipe, with other versions in its variations. Card numbers show average stars, 3★ rate, average destruction and battle time.${sort === 'used' ? '' : ' Performance sorts require a minimum player sample and 10+ attacks.'}</p>
     <div class="xp"><div class="acards">${cards || '<div class="msg">Not enough armies in this group yet.</div>'}</div>${expandBtn(list.length, 'more armies', ARMY_SHOW)}</div>
     ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, base)}${openerHTML(t, base)}</section>${rkStrategyTop(t, 10)}`;
 }
@@ -466,13 +464,13 @@ async function rkInit() {
 // ---------- player card (downloadable image) ----------
 // Same 1600px card the Discord bot makes (townhallStats.js): rank tiles, your week vs the town hall average, town hall at a glance,
 // top lists with the player pinned, and (when the data has them) the most popular armies and openers. Drawn on a canvas in the browser.
-// The town hall's numbers come from the same crawl data this page already loaded, so no extra files are needed besides that town hall's shard
-// (reused from the page's cache when the selected town hall matches).
+// Cards prefer the bot's published scope, player, and army summaries so image statistics use the same inputs as Discord.
 // Icons are loaded with crossOrigin="anonymous": if the asset server doesn't allow cross-site images, those icons are skipped
 // (the card still downloads) and the status line says how many were missing.
 const RKC = { M: 44, GAP: 20, BASE_H: 1000, AH: 300, scopes: new Map(), last: null };
 const RKC_COL = { gold: '#e0a526', green: '#3ddc84', red: '#ff6b6b', lime: '#9be564', blue: '#7fd4ff', orange: '#ff9f43', dim: 'rgba(255,255,255,.55)', soft: 'rgba(255,255,255,.82)' };
-const rkcFont = (s) => `bold ${Math.max(8, Math.round(s))}px "Supercell-Magic", "Barlow", "Noto Sans", "Segoe UI", system-ui, sans-serif`;
+// Supercell Magic is wider than the fallback fonts; use the same card-wide scale as the Discord renderer.
+const rkcFont = (s) => `bold ${Math.max(8, Math.round(s * 0.86))}px "Supercell-Magic", "Barlow", "Noto Sans", "Segoe UI", system-ui, sans-serif`;
 const rkcPct = (a, b, d = 1) => (b ? `${(100 * a / b).toFixed(d)}%` : '–');
 const rkcAvg = (a, b, d = 2) => (b ? (a / b).toFixed(d) : '–');
 const rkcDur = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
@@ -491,12 +489,72 @@ function rkcText(c, s, x, y, size, color, o = {}) {
   }
   c.fillText(s, x, y); c.textAlign = 'left';
 }
-// Canvas crown (drawn as a shape so it doesn't depend on an emoji font). (x, yb) = bottom-left corner, w = width.
+// Canvas crown (drawn as shapes, matching the Discord card so it never depends on an emoji font).
+// Detail scales with size: compact name rows stay legible; the player title gets the full jeweled crown.
 function rkcCrown(c, x, yb, w) {
-  const h = w * 0.78, P = [[0, 1], [0, 0.3], [0.25, 0.62], [0.5, 0], [0.75, 0.62], [1, 0.3], [1, 1]];
-  c.save(); c.beginPath(); P.forEach(([px, py], i) => c[i ? 'lineTo' : 'moveTo'](x + px * w, yb - h + py * h)); c.closePath();
-  c.fillStyle = '#f5c542'; c.fill(); c.lineWidth = Math.max(1, w / 16); c.strokeStyle = '#b8860b'; c.lineJoin = 'round'; c.stroke();
-  c.fillStyle = '#fff3b0'; [[0, 0.3], [0.5, 0], [1, 0.3]].forEach(([px, py]) => { c.beginPath(); c.arc(x + px * w, yb - h + py * h, Math.max(1.5, w / 10), 0, Math.PI * 2); c.fill(); });
+  const big = w >= 40, mid = w >= 26;
+  const pr = w * 0.085, h = w * 0.78, top = yb - h + pr * 1.5, ht = h - pr * 1.5;
+  const X = u => x + u * w, Y = v => top + v * ht, cx = x + w / 2, cy = yb - h * 0.5;
+  const P = mid
+    ? [[0, 1], [0, 0.3], [0.125, 0.62], [0.25, 0.12], [0.375, 0.55], [0.5, 0], [0.625, 0.55], [0.75, 0.12], [0.875, 0.62], [1, 0.3], [1, 1]]
+    : [[0, 1], [0, 0.3], [0.25, 0.62], [0.5, 0], [0.75, 0.62], [1, 0.3], [1, 1]];
+  const peaks = mid ? [[0, 0.3, 0.8], [0.25, 0.12, 0.9], [0.5, 0, 1.3], [0.75, 0.12, 0.9], [1, 0.3, 0.8]] : [[0, 0.3, 1], [0.5, 0, 1.3], [1, 0.3, 1]];
+  const body = () => { c.beginPath(); P.forEach(([u, v], i) => c[i ? 'lineTo' : 'moveTo'](X(u), Y(v))); c.closePath(); };
+  const bandTop = Y(0.76), gy = Y(0.88);
+  c.save(); c.lineJoin = 'round'; c.lineCap = 'round';
+  const R = w * (big ? 1.25 : 1.0), halo = c.createRadialGradient(cx, cy, w * 0.1, cx, cy, R);
+  halo.addColorStop(0, 'rgba(255,214,90,.55)'); halo.addColorStop(0.45, 'rgba(255,176,40,.2)'); halo.addColorStop(1, 'rgba(255,160,20,0)');
+  c.fillStyle = halo; c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.fill();
+  if (big) {
+    const rays = c.createRadialGradient(cx, cy + h * 0.2, w * 0.2, cx, cy + h * 0.2, w * 1.5);
+    rays.addColorStop(0, 'rgba(255,228,130,.34)'); rays.addColorStop(1, 'rgba(255,228,130,0)'); c.fillStyle = rays;
+    for (let i = 0; i < 9; i++) {
+      const a = Math.PI * (1.08 + i * 0.105), da = 0.028 * Math.PI;
+      c.beginPath(); c.moveTo(cx, cy + h * 0.2);
+      c.lineTo(cx + Math.cos(a - da) * w * 1.5, cy + h * 0.2 + Math.sin(a - da) * w * 1.5);
+      c.lineTo(cx + Math.cos(a + da) * w * 1.5, cy + h * 0.2 + Math.sin(a + da) * w * 1.5); c.closePath(); c.fill();
+    }
+  }
+  const g = c.createLinearGradient(0, top, 0, yb);
+  g.addColorStop(0, '#fff2a8'); g.addColorStop(0.35, '#ffd447'); g.addColorStop(0.7, '#f0a020'); g.addColorStop(1, '#b86f0a');
+  c.shadowColor = 'rgba(255,190,50,.95)'; c.shadowBlur = w * 0.3; body(); c.fillStyle = g; c.fill();
+  c.shadowColor = 'transparent'; c.shadowBlur = 0; body(); c.fillStyle = g; c.fill();
+  c.save(); body(); c.clip();
+  const sh = c.createLinearGradient(x, top, x + w, yb);
+  sh.addColorStop(0.18, 'rgba(255,255,255,0)'); sh.addColorStop(0.34, 'rgba(255,255,255,.5)'); sh.addColorStop(0.46, 'rgba(255,255,255,0)');
+  sh.addColorStop(0.62, 'rgba(255,255,255,.18)'); sh.addColorStop(0.7, 'rgba(255,255,255,0)'); c.fillStyle = sh; c.fillRect(x, top, w, ht);
+  const bg = c.createLinearGradient(0, bandTop, 0, yb);
+  bg.addColorStop(0, '#e9a21f'); bg.addColorStop(0.5, '#c97d0c'); bg.addColorStop(1, '#8f5304'); c.fillStyle = bg; c.fillRect(x - 1, bandTop, w + 2, yb - bandTop + 1);
+  c.lineWidth = Math.max(0.8, w / 40); c.strokeStyle = '#7a4700'; c.beginPath(); c.moveTo(x, bandTop); c.lineTo(x + w, bandTop); c.stroke();
+  c.strokeStyle = 'rgba(255,240,170,.8)'; c.beginPath(); c.moveTo(x, bandTop + c.lineWidth); c.lineTo(x + w, bandTop + c.lineWidth); c.stroke();
+  body(); c.lineWidth = Math.max(1.5, w / 7); c.strokeStyle = 'rgba(255,244,176,.38)'; c.stroke(); c.restore();
+  body(); c.lineWidth = Math.max(1, w / 15); c.strokeStyle = '#8a5a00'; c.stroke();
+  peaks.forEach(([u, v, k]) => {
+    const r = pr * k, px = X(u), py = Y(v) - r * 0.35; c.save(); c.shadowColor = 'rgba(255,245,190,.95)'; c.shadowBlur = r * 2.2;
+    const pg = c.createRadialGradient(px - r * 0.35, py - r * 0.35, r * 0.1, px, py, r);
+    pg.addColorStop(0, '#ffffff'); pg.addColorStop(0.55, '#fff3b0'); pg.addColorStop(1, '#e8b84a');
+    c.beginPath(); c.arc(px, py, r, 0, Math.PI * 2); c.fillStyle = pg; c.fill(); c.shadowBlur = 0;
+    c.lineWidth = Math.max(0.6, w / 40); c.strokeStyle = '#b8860b'; c.stroke(); c.restore();
+  });
+  const gem = (u, r, light, mid2, dark) => {
+    const px = X(u); c.save(); c.shadowColor = mid2; c.shadowBlur = r * 1.6;
+    const gg = c.createLinearGradient(px - r, gy - r, px + r, gy + r); gg.addColorStop(0, light); gg.addColorStop(0.5, mid2); gg.addColorStop(1, dark);
+    c.beginPath(); c.moveTo(px, gy - r * 1.1); c.lineTo(px + r, gy); c.lineTo(px, gy + r * 1.1); c.lineTo(px - r, gy); c.closePath();
+    c.fillStyle = gg; c.fill(); c.shadowBlur = 0; c.lineWidth = Math.max(0.5, w / 50); c.strokeStyle = 'rgba(60,20,0,.8)'; c.stroke();
+    if (r > 2.2) { c.beginPath(); c.moveTo(px - r * 0.45, gy - r * 0.1); c.lineTo(px, gy - r * 0.85); c.lineTo(px + r * 0.1, gy - r * 0.1); c.closePath(); c.fillStyle = 'rgba(255,255,255,.65)'; c.fill(); }
+    c.restore();
+  };
+  const gr = Math.max(1.6, ht * 0.1); gem(0.5, gr * 1.3, '#ff9aa8', '#e0223c', '#7a0a1c');
+  if (mid) { gem(0.27, gr, '#b8ecff', '#2e9bff', '#0b3f8f'); gem(0.73, gr, '#b8ecff', '#2e9bff', '#0b3f8f'); }
+  if (big) { gem(0.1, gr * 0.7, '#ffffff', '#cfe9ff', '#7fa6cf'); gem(0.9, gr * 0.7, '#ffffff', '#cfe9ff', '#7fa6cf'); }
+  const spark = (px, py, s) => {
+    c.save(); c.shadowColor = 'rgba(255,235,150,1)'; c.shadowBlur = s * 1.2; c.fillStyle = '#fffdf0'; c.beginPath(); c.moveTo(px, py - s);
+    c.quadraticCurveTo(px, py, px + s, py); c.quadraticCurveTo(px, py, px, py + s); c.quadraticCurveTo(px, py, px - s, py);
+    c.quadraticCurveTo(px, py, px, py - s); c.closePath(); c.fill(); c.restore();
+  };
+  spark(x + w * 1.02, yb - h * 1.0, w * (big ? 0.2 : 0.17));
+  if (mid) spark(x - w * 0.04, yb - h * 0.62, w * 0.12);
+  if (big) { spark(x + w * 0.62, yb - h * 1.04, w * 0.09); spark(x + w * 0.88, yb - h * 0.22, w * 0.07); }
   c.restore();
 }
 const rkcMeasure = (c, s, size) => { c.font = rkcFont(size); return c.measureText(String(s)).width; };
@@ -513,6 +571,394 @@ function rkcOpenerUrls(raw, code) {
     if (name === '@revenge') return ['equip', inf?.heroes.find((h) => h.name === 'Dragon Duke')?.equip.find((g) => /revenge/i.test(g)) || null];
     return [cat, name];
   }).filter(([, name]) => name).map(([cat, name]) => ckUrl(partIcon(cat, name))).filter(Boolean).slice(0, 4);
+}
+
+// Match the Discord card's opener rows: show the heroes that perform the opener before its gear and pet icons.
+const RKC_OPENER_HEROES = [
+  [/^Queen Charge$/i, ['Archer Queen']],
+  [/^RC Charge/i, ['Royal Champion']],
+  [/^Warden Fireball/i, ['Grand Warden']],
+  [/^(Rocket Backpack \+ Arrow, Fireball|Fireball \+ Backpack Arrow)/i, ['Dragon Duke', 'Archer Queen', 'Grand Warden']],
+  [/^Backpack Arrow/i, ['Dragon Duke', 'Archer Queen']],
+  [/^Fireball \+ (Backpack Blower|Zap Backpack)/i, ['Dragon Duke', 'Grand Warden']],
+  [/^(Blower Backpack|Zap Backpack|Ice Block Revenge|Duke )/i, ['Dragon Duke']],
+];
+function rkcOpenerHeroUrls(name) {
+  const hit = RKC_OPENER_HEROES.find(([re]) => re.test(String(name || '')));
+  return hit ? hit[1].map(heroIconUrl).filter(Boolean) : [];
+}
+
+// Image cards use the same compact, precomputed files as the Discord renderer. The page itself can
+// continue using the crawl shards, while cards share the bot's exact totals, top lists and army inputs.
+RKC.files = new Map();
+async function rkcBotFile(week, rel, gz = false) {
+  const liveSlot = week.cur ? Math.floor(Date.now() / RK.LIVE_MS) : '';
+  const key = `${week.key}|${rel}|${liveSlot}`;
+  if (RKC.files.has(key)) return RKC.files.get(key);
+  const url = `${CONFIG.REPO_RAW}/${RK.BRANCH}/ranked/${week.key}/stats/${rel}${week.cur ? `?t=${liveSlot}` : ''}`;
+  const promise = rkFetch(url, gz);
+  RKC.files.set(key, promise);
+  try {
+    const data = await promise;
+    if (!data) RKC.files.delete(key);
+    while (RKC.files.size > 12) RKC.files.delete(RKC.files.keys().next().value);
+    return data;
+  } catch (e) { RKC.files.delete(key); throw e; }
+}
+const rkcBotScope = (raw, th, week) => {
+  if (!raw?.G) return null;
+  const G = { ...raw.G, tracked: raw.G.tracked || 0, astars: raw.G.astars || [0, 0, 0, 0], dstars: raw.G.dstars || [0, 0, 0, 0] };
+  const tops = Object.fromEntries(Object.entries(raw.tops || {}).map(([k, rows]) => [k, (rows || []).map(r => ({ ...r, ga: r.ga ?? r.la ?? r.na }))]));
+  return { th, week, G, tops, leagues: raw.leagues || [], tracked: G.tracked, rows: { length: G.tracked } };
+};
+function rkcBotStrategy(army, townHall) {
+  if (!army) return { strategy: 'Unknown Build', opener: 'Spam Opener' };
+
+  const troopsMain = army.troops || [];
+  const troops  = new Set(troopsMain.map(t => t.name));
+  const spells  = new Set((army.spells || []).map(s => s.name));
+  const heroes  = new Set((army.heroes || []).map(h => h.name));
+
+  // Includes spells parked in the clan castle, not just the main spell
+  // factory — a common trick for Duke/RC Charge is to stash an extra
+  // Invisibility in the CC, and that should count the same as one carried
+  // in the main army when checking charge thresholds.
+  const spellCount  = (name) => {
+    const mainCount = (army.spells || []).find(s => s.name === name)?.count || 0;
+    const ccCount = (army.ccSpells || []).find(s => s.name === name)?.count || 0;
+    return mainCount + ccCount;
+  };
+  const invisCount  = spellCount('Invisibility');
+  const totemCount  = spellCount('Totem');
+  const eqCount     = spellCount('Earthquake');
+  const lightningCount = spellCount('Lightning');
+  const cloneCount  = spellCount('Clone');
+  // Counts spells (main + clan castle) whose name matches a pattern, so a slightly
+  // different in-data name ("Ice Block" / "Ice Block Spell") still counts.
+  const spellMatchCount = (re) => [...(army.spells || []), ...(army.ccSpells || [])]
+    .filter(sp => re.test(sp.name || ''))
+    .reduce((n, sp) => n + (sp.count || 1), 0);
+  const iceBlockCount = spellMatchCount(/ice block/i);
+
+  if (isFarmingArmy(army, townHall)) {
+    return { strategy: 'Farming Army', opener: 'Spam Opener' };
+  }
+
+  const throwerCount = troopsMain.find(t => t.name === 'Thrower')?.count || 0;
+  const dragonRiderCount = troopsMain.find(t => t.name === 'Dragon Rider')?.count || 0;
+  const dragonCount = troopsMain.find(t => t.name === 'Dragon')?.count || 0;
+  const electroDragonCount = troopsMain.find(t => t.name === 'Electro Dragon')?.count || 0;
+  const rootRiderCount = troopsMain.find(t => t.name === 'Root Rider')?.count || 0;
+  const rocketBalloonCount = troopsMain.find(t => t.name === 'Rocket Balloon')?.count || 0;
+  const superMinionCount = troopsMain.find(t => t.name === 'Super Minion')?.count || 0;
+  const balloonCount = troopsMain.find(t => t.name === 'Balloon' || t.name === 'Rocket Balloon')?.count || 0;
+  const superYetiCount = troopsMain.find(t => t.name === 'Super Yeti')?.count || 0;
+  const superWitchCount = troopsMain.find(t => t.name === 'Super Witch')?.count || 0;
+  const superDragonCount = troopsMain.find(t => t.name === 'Super Dragon')?.count || 0;
+  const lavaHoundCount = troopsMain.reduce((sum, t) => (t.name === 'Lava Hound' || t.name === 'Ice Hound') ? sum + (t.count || 0) : sum, 0);
+
+  let queen = (army.heroes || []).find(h => h.name === 'Archer Queen');
+  const rc = (army.heroes || []).find(h => h.name === 'Royal Champion');
+  const duke = (army.heroes || []).find(h => h.name === 'Dragon Duke');
+
+  if (!queen) {
+    const queenEquip = ['Giant Arrow', 'Monolith Arrow', 'Healer Puppet', 'Invisibility Vial', 'Archer Puppet', 'Frozen Arrow'];
+    for (const h of (army.heroes || [])) {
+      if ((h.equip1 && queenEquip.includes(h.equip1)) || (h.equip2 && queenEquip.includes(h.equip2))) {
+        queen = h;
+        if (h.name !== 'Archer Queen') h.name = 'Archer Queen';
+        break;
+      }
+    }
+  }
+
+  const rcPet = rc?.pet || null;
+  const dukePet = duke?.pet || null;
+
+  const heroGear = (hero) => new Set([hero?.equip1, hero?.equip2].filter(Boolean));
+  const allGear = new Set();
+  (army.heroes || []).forEach(h => {
+    if (h.equip1) allGear.add(h.equip1);
+    if (h.equip2) allGear.add(h.equip2);
+  });
+  const dukeGear = heroGear(duke);
+  const queenGear = heroGear(queen);
+
+  const ccTroops = new Set((army.ccTroops || []).map(t => t.name));
+  const siegeMachines = new Set((army.siege || []).map(s => s.name));
+  const hasBattleBlimp = siegeMachines.has('Battle Blimp');
+  const hasSuperWizardCC = ccTroops.has('Super Wizard');
+  const hasSuperArcherCC = ccTroops.has('Super Archer');
+  const hasSuperYetiCC = ccTroops.has('Super Yeti');
+
+  // Troop with the most housing space inside the Battle Blimp (i.e. among
+  // the CC troops it carries) — used as a generic fallback opener name
+  // below whenever the Blimp is present but none of the more specific
+  // named CC-troop combos (Super Archer/Super Wizard Blizzard, Super Yeti
+  // Clone Blimp, etc.) matched.
+  let maxBlimpTroop = null;
+  let maxBlimpHousing = 0;
+  (army.ccTroops || []).forEach(t => {
+    const space = TROOP_HOUSING[t.name] || 1;
+    const totalSpace = (t.count || 0) * space;
+    if (totalSpace > maxBlimpHousing) {
+      maxBlimpHousing = totalSpace;
+      maxBlimpTroop = t.name;
+    }
+  });
+
+  // Monolith Arrow on the queen, paired with one of the three pets that
+  // support a Queen Charge (Unicorn, Greedy Raven, Angry Jelly) — no longer
+  // locked to Angry Jelly specifically.
+  const hasQueenCharge = queen && queenGear.has('Monolith Arrow') && ['Unicorn', 'Greedy Raven', 'Angry Jelly'].includes(queen.pet);
+  // 2+ invis (not >4) — a typical charge army carries 2-4 Invisibility
+  // spells, not 5+. The old >4 threshold was inconsistent with the Stun
+  // variant and RC Charge Opener below (both use >=2), and was silently
+  // missing most real charge armies.
+  // RC Charge = a Royal Champion with 4 or more Invisibility spells (main + clan castle); no pet / gear requirement.
+  const hasRCCharge = rc && invisCount >= 4;
+  const hasDukeCharge = duke && (dukePet === 'Spirit Fox' || dukePet === 'Angry Jelly') && invisCount >= 2;
+  // Relaxed variant: Angry Jelly + Electro Fangs on the Duke qualifies as a
+  // Duke Charge on its own, without needing the invis-count threshold.
+  const hasDukeChargeJelly = duke && dukePet === 'Angry Jelly' && dukeGear.has('Electro Fangs');
+  // Spirit Fox + Electro Fangs + Stun Blaster (both Duke epic gear slots used
+  // for the stun combo) with 2+ Invisibility spells to cover the charge in.
+  const hasDukeChargeStun = duke && dukePet === 'Spirit Fox' && dukeGear.has('Electro Fangs') && dukeGear.has('Stun Blaster') && invisCount >= 2;
+  // Now keyed on Warden Fireball rather than Earthquake count — the Duke
+  // brings Rocket Backpack + Flame Blower, the Warden brings Fireball.
+  const hasDukeBlowerCombo = duke && dukeGear.has('Rocket Backpack') && dukeGear.has('Flame Blower') && allGear.has('Fireball');
+  const queenHasGiantArrow = queen && queenGear.has('Giant Arrow');
+  // Distinct from hasDukeBlowerCombo above: this doesn't require the Warden's
+  // Fireball, just the Duke running both Flame Blower + Rocket Backpack gear
+  // together with at least one Earthquake spell in the army, and — to keep it
+  // from overlapping with the Giant-Arrow-driven combos below — no Giant
+  // Arrow equipped on the queen.
+  const hasBlowerBackpackCombo = duke && dukeGear.has('Flame Blower') && dukeGear.has('Rocket Backpack') && eqCount >= 1 && !queenHasGiantArrow;
+  // Warden Fireball + Duke Rocket Backpack (no Flame Blower needed here), with
+  // no Giant Arrow on the queen (or no queen at all), backed by 2+ Lightning
+  // spells instead of Earthquake.
+  const hasFireballZapBackpack = allGear.has('Fireball') && dukeGear.has('Rocket Backpack') && (!queen || !queenHasGiantArrow) && lightningCount >= 2;
+  // Simpler/broader variant: just Duke Rocket Backpack + at least 1 Lightning
+  // spell, no Fireball or queen-gear requirement. Checked after the more
+  // specific Fireball+Zap combo above so that stronger match still wins when
+  // both would otherwise qualify.
+  const hasZapBackpack = duke && dukeGear.has('Rocket Backpack') && lightningCount >= 1;
+  // Duke carrying the Revenge Deck with at least 2 Ice Blocks. Any gear whose name contains
+  // "revenge" counts. The Rocket Backpack openers above/below take priority over it (see the
+  // `!dukeGear.has('Rocket Backpack')` check in the opener chain).
+  const hasIceBlockRevenge = duke && [...dukeGear].some(g => /revenge/i.test(String(g))) && iceBlockCount >= 2;
+  const isTotemSpam = totemCount > 8;
+
+  // CC-troop + invis "blimp" openers — all three require Battle Blimp as the siege machine.
+  const isSuperArcherWizardBlimp = hasSuperWizardCC && hasSuperArcherCC && hasBattleBlimp;
+  const isBlizzard = hasSuperWizardCC && !hasSuperArcherCC && invisCount > 4 && hasBattleBlimp;
+  const isSuperArcherBlimp = hasSuperArcherCC && !hasSuperWizardCC && invisCount >= 4 && hasBattleBlimp;
+
+  let openerName = 'Spam Opener';
+
+  if (isTotemSpam) openerName = 'Spam';
+  else if (hasDukeBlowerCombo && queenHasGiantArrow) openerName = 'Fireball + Backpack Arrow (Blower)';
+  else if (hasDukeBlowerCombo) openerName = 'Fireball + Backpack Blower';
+  else if (hasBlowerBackpackCombo) openerName = 'Blower Backpack';
+  else if (hasFireballZapBackpack) openerName = 'Fireball + Zap Backpack';
+  else if (hasZapBackpack) openerName = 'Zap Backpack';
+  else if (hasIceBlockRevenge && !dukeGear.has('Rocket Backpack')) openerName = 'Ice Block Revenge Deck';
+  else if (hasQueenCharge) openerName = 'Queen Charge';
+  else if (hasRCCharge) openerName = 'RC Charge';
+  else if (isSuperArcherWizardBlimp) openerName = 'Super Archer + Super Wizard Blimp';
+  else if (isBlizzard) openerName = 'Blizzard';
+  else if (isSuperArcherBlimp) openerName = 'Super Archer Blimp';
+  else if (hasDukeChargeStun) openerName = 'Duke Charge (Stun)';
+  else if (hasDukeCharge && allGear.has('Rocket Backpack')) openerName = 'Duke Backpack Snapping';
+  else if (hasDukeCharge) openerName = 'Duke Charge Opener';
+  else if (hasDukeChargeJelly) openerName = 'Duke Charge (Jelly)';
+  else if (dukeGear.has('Rocket Backpack') && queenHasGiantArrow && allGear.has('Fireball') && eqCount >= 2) openerName = 'Rocket Backpack + Arrow, Fireball';
+  else if (dukeGear.has('Rocket Backpack') && queenGear.has('Giant Arrow') && eqCount >= 2) openerName = 'Backpack Arrow Combo';
+  else if (allGear.has('Fireball') && eqCount >= 2) openerName = 'Warden Fireball Opener';
+  else if (troops.has('Root Rider') && heroes.has('Royal Champion') && invisCount >= 2) openerName = 'RC Charge Opener';
+
+  let mainCore = 'Mixed Army Smash';
+
+  const supportTroops = new Set(['Healer', 'Baby Dragon', 'Drop Ship']);
+  let maxHousingTroop = null;
+  let maxHousing = 0;
+
+  troopsMain.forEach(t => {
+    if (supportTroops.has(t.name)) return;
+    const space = TROOP_HOUSING[t.name] || 1;
+    const totalSpace = (t.count || 0) * space;
+    if (totalSpace > maxHousing) {
+      maxHousing = totalSpace;
+      maxHousingTroop = t.name;
+    }
+  });
+
+  if (troops.has('Super Bowler')) mainCore = 'Super Bowler Smash';
+  else if (throwerCount > 8) mainCore = 'Throwers';
+  else if (allGear.has('Fireball') && superMinionCount >= 4 && rocketBalloonCount >= 4) mainCore = 'Super Minions + Rocket Balloons (Norman)';
+  else if (allGear.has('Fireball') && rocketBalloonCount >= 15) mainCore = 'Fireball Rocketballoons';
+  else if (allGear.has('Fireball') && troops.has('Rocket Balloon')) mainCore = 'Rocket Balloon Snipe';
+  else if (rootRiderCount >= 3) mainCore = 'Root Riders';
+  else if ((hasDukeCharge || hasDukeChargeJelly) && troops.has('Dragon Rider')) mainCore = 'Dragon Riders';
+  else if ((hasDukeCharge || hasDukeChargeJelly) && troops.has('Hog Rider') && troops.has('Miner')) mainCore = 'Duke Charge Hybrid';
+  else if (throwerCount >= 7) mainCore = 'Thrower Totem Spam';
+  else if (troops.has('Meteor Golem')) mainCore = 'Meteor Golem Smash';
+  else if (troops.has('Hog Rider') && troops.has('Miner')) mainCore = 'Queen Charge Hybrid';
+  else if (electroDragonCount >= 6) mainCore = 'Mass E-Drag Chain Spam';
+  else if (superDragonCount > 5) mainCore = 'Super Dragon Smash';
+  else if (Math.abs(dragonRiderCount - dragonCount) <= 7 && (dragonRiderCount + dragonCount) >= 8) mainCore = 'Hydra Air Smash';
+  else if (dragonRiderCount >= 6) mainCore = 'Dragon Riders';
+  else if (superWitchCount >= 3) mainCore = 'Super Witch Smash';
+  else if (superYetiCount >= 5) mainCore = 'Super Yeti Revive';
+  else if (troops.has('Dragon')) mainCore = 'Hydra Air Smash';
+  else if (troops.has('Super Yeti') || spells.has('Revive')) mainCore = 'Super Yeti Revive';
+  else if (balloonCount >= 18 && lavaHoundCount >= 2) mainCore = 'LaLo Precision Dive';
+  else if (troops.has('Lava Hound') || troops.has('Ice Hound')) mainCore = 'LaLo Precision Dive';
+  else if (maxHousingTroop) mainCore = `${maxHousingTroop} Smash`;
+
+  // Hydra + Duke Rocket Backpack + Queen Giant Arrow with no Earthquakes: an air-defense snipe.
+  // Only replaces the fallback, so every more specific opener above (Zap Backpack, Queen/Duke
+  // Charge, Totem 'Spam', ...) still wins. Needs mainCore, so it is decided here, not in the chain.
+  if (openerName === 'Spam Opener' && mainCore === 'Hydra Air Smash'
+      && dukeGear.has('Rocket Backpack') && queenHasGiantArrow && eqCount === 0) {
+    openerName = 'Backpack Arrow (Air Def Snipe)';
+  }
+
+  let finalStrategy = mainCore;
+  if (isTotemSpam) finalStrategy = `Totem Spam + ${mainCore}`;
+  else if (openerName === 'Fireball + Backpack Arrow (Blower)' || openerName === 'Fireball + Backpack Blower') finalStrategy = `${openerName} + ${mainCore}`;
+  else if (openerName === 'RC Charge' && allGear.has('Rocket Backpack') && allGear.has('Giant Arrow')) finalStrategy = 'RC Charge Arrow Backpack Root Riders';
+  else if (openerName === 'Backpack Arrow Combo' && troops.has('Root Rider')) finalStrategy = 'RC Charge Backpack Arrow Root Riders';
+  else if (openerName === 'Warden Fireball Opener' && mainCore === 'Fireball Rocketballoons') finalStrategy = 'Fireball Rocketballoons';
+  else if (openerName === 'Backpack Arrow (Air Def Snipe)') finalStrategy = 'Backpack Arrow Hydra (Air Def Snipe)';
+  else if (openerName !== 'Spam Opener') finalStrategy = `${openerName} + ${mainCore}`;
+
+  return { strategy: capitalizeWords(finalStrategy), opener: capitalizeWords(openerName) };
+}
+
+function rkcBotArmyFamily(strategyText) {
+  if (!strategyText || strategyText === 'No Data') return 'Other';
+  const s = strategyText.toLowerCase().replace(/\s+/g, '');
+
+  if (s.includes('superbowler')) return 'Super Bowlers';
+  if (s.includes('rootrider')) return 'Root Riders';
+  if (s.includes('dragonrider')) return 'Dragon Riders';
+  if (s.includes('meteorgolem')) return 'Meteor Golems';
+  if (s.includes('superyeti')) return 'Super Yetis';
+  if (s.includes('hydra')) return 'Hydra';
+  if (s.includes('lalo')) return 'Lalo';
+  if (s.includes('thrower')) return 'Throwers';
+  if (s.includes('rocketballoon')) return 'Fireball Opener: Rocket Balloons/Super Minion';
+  if (s.includes('superdragon') || s.includes('e-drag') || s.includes('electrodragon')) return 'Air Spam';
+
+  // Anything else — including "Duke Charge Hybrid", "Queen Charge Hybrid",
+  // "Super Witch Smash", "Mixed Army Smash", and any generic "<troop> Smash"
+  // fallback — lands here. This also covers the Duke-Charge-into-air case
+  // called out in the recipe key: it isn't given the standard air recipe
+  // (2 Witch/Furnace/2HH) just because it's air and Duke-Charge-flavored —
+  // it gets the same "Other" recipe as everything else unclassified.
+  return 'Other';
+}
+
+const RKC_ARMY_FAMILIES = [
+  ['Throwers', /thrower/i], ['Root Riders', /root\s*-?\s*rider/i], ['Super Bowlers', /super\s*-?\s*bowler/i],
+  ['Super Yetis', /super\s*-?\s*yeti/i], ['Meteor Golems', /meteor/i], ['Hydra', /hydra/i],
+  ['Dragon Riders', /dragon\s*-?\s*rider/i], ['Lalo', /\blalo\b/i], ['Air Spam', /air\s*-?\s*spam/i],
+  ['Fireball Opener: Rocket Balloons/Super Minion', /rocket\s*-?\s*balloon/i],
+];
+function rkcArmyFamily(label) {
+  for (const [name, re] of RKC_ARMY_FAMILIES) if (re.test(String(label || ''))) return name;
+  return null;
+}
+function rkcProfile(code, th) {
+  if (!code) return null;
+  try {
+    const inf = infoOf(code), army = warArmyOf(code, inf.heroes), p = rkcBotStrategy(army, th || undefined);
+    const cat = rkcBotArmyFamily(p.strategy);
+    return { strategy: p.strategy, opener: p.opener, family: cat && cat !== 'Other' ? cat : rkcArmyFamily(p.strategy) };
+  } catch { return null; }
+}
+function rkcMergeBotArmies(armyData, th) {
+  const merged = new Map(), fields = ['players', 'uses', 's3', 'st', 'pct'];
+  // Keep the bot's displayed base: players linked to any army, counted once per source group.
+  const armyPlayers = (armyData?.groups || []).reduce((t, g) => t + (g.players || 0), 0);
+  const bucket = (id, label, g) => {
+    let m = merged.get(id);
+    if (!m) { m = { key: id, label, players: 0, uses: 0, s3: 0, st: 0, pct: 0, icons: g.icons || [], keys: new Set(), best: -1, cw: new Map(), pw: new Map(), family: id.startsWith('family:') }; merged.set(id, m); }
+    return m;
+  };
+  const add = (m, g, x, pure = false) => {
+    if (!(x.players > 0 || x.uses > 0)) return;
+    for (const k of fields) m[k] += x[k] || 0;
+    if (g.key != null) m.keys.add(g.key);
+    if ((g.players || 0) > m.best) { m.best = g.players || 0; m.icons = g.icons || []; }
+    const w = (x.players || 0) + (x.uses || 0) * 1e-6;
+    m.cw.set(g, (m.cw.get(g) || 0) + w);
+    if (pure) m.pw.set(g, (m.pw.get(g) || 0) + w);
+  };
+  for (const g of armyData?.groups || []) {
+    const own = () => bucket(`army:${g.key ?? g.label}`, g.label, g);
+    const rep = rkcProfile(g.code, th), repFam = rep ? rep.family : rkcArmyFamily(g.label), rest = {};
+    for (const k of fields) rest[k] = g[k] || 0;
+    for (const v of rep ? (g.variants || []) : []) {
+      const p = rkcProfile(v.code, th), x = {};
+      for (const k of fields) x[k] = v[k] || 0;
+      x.players = g.uses ? (g.players || 0) * Math.min(1, (v.uses || 0) / g.uses) : 0;
+      for (const k of fields) rest[k] -= x[k];
+      add(p?.family ? bucket(`family:${p.family}`, p.family, g) : own(), g, x, !!p?.family && p.family === repFam);
+    }
+    for (const k of fields) rest[k] = Math.max(0, rest[k]);
+    add(repFam ? bucket(`family:${repFam}`, repFam, g) : own(), g, rest, !!repFam);
+  }
+  for (const m of merged.values()) {
+    if (!m.family) continue;
+    const pool = m.pw.size ? m.pw : m.cw;
+    let bestG = null, bestW = -1;
+    for (const [g, w] of pool) if (w > bestW) { bestW = w; bestG = g; }
+    if (bestG) m.icons = bestG.icons || [];
+    if (m.label === 'Hydra') {
+      const total = [...m.cw.values()].reduce((t, w) => t + w, 0) || 1, share = new Map();
+      for (const [g, w] of m.cw) for (const ic of new Set((g.icons || []).filter(Boolean))) share.set(ic, (share.get(ic) || 0) + w / total);
+      const picked = [...share].filter(([, sh]) => sh >= 0.1).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([ic]) => ic);
+      if (picked.length) m.icons = picked;
+    }
+  }
+  const groups = [...merged.values()].sort((a, b) => b.players - a.players || b.uses - a.uses).slice(0, 5)
+    .map(g => ({ ...g, icons: (g.icons || []).map(ckUrl), keys: [...g.keys] }));
+  const openerMap = new Map();
+  for (const o of armyData?.openers || []) {
+    const p = rkcProfile(o.code, th), name = p?.opener || o.name;
+    let m = openerMap.get(name);
+    if (!m) { m = { ...o, name, n: 0, st: 0, s3: 0, names: new Set(), best: -1 }; openerMap.set(name, m); }
+    m.n += o.n || 0; m.st += o.st || 0; m.s3 += o.s3 || 0; m.names.add(o.name);
+    if ((o.n || 0) > m.best) { m.best = o.n || 0; m.icons = o.icons || []; m.code = o.code; }
+  }
+  const openerRows = [...openerMap.values()].map(m => {
+    const sameName = (armyData?.openers || []).find(o => o.name === m.name);
+    if (sameName) m.icons = sameName.icons || [];
+    else if (m.names.size !== 1) m.icons = [];
+    const heroes = rkcOpenerHeroUrls(m.name), icons = (m.icons || []).map(ckUrl);
+    return { ...m, icons: [...heroes, ...icons.filter(ic => !heroes.includes(ic))].slice(0, 5) };
+  }).sort((a, b) => b.n - a.n).slice(0, 5);
+  return { groups, openers: openerRows, withCode: armyPlayers, oTotal: (armyData?.openers || []).reduce((t, o) => t + (o.n || 0), 0) };
+}
+function rkcBotLeagues(leagues, max = 3) {
+  return (leagues || []).filter(l => l?.name && !/^unranked$/i.test(l.name) && (l.n || 0) > 0)
+    .sort((a, b) => (b.lid || 0) - (a.lid || 0)).slice(0, max)
+    .map(l => ({ label: String(l.name).replace(/\s+league\b/i, '').trim(), icon: rkcLeagueUrl(l.name), n: l.n, lid: l.lid }));
+}
+function rkcBotRanks(rec, scopeName) {
+  const src = (scopeName === 'all' ? rec.rank?.all : rec.rank?.th) || {};
+  const out = {};
+  for (const k of ['global', 'league', 'attack', 'stars', 'most3', 'defense', 'zero', 'fastest', 'offtr', 'deftr']) {
+    const v = src[k]; out[k] = Array.isArray(v) ? { rank: v[0], total: v[1], q: !!v[2] } : null;
+  }
+  return out;
+}
+async function rkcBotPlayer(tag, week) {
+  const t = normTag(tag), shard = t.slice(1).slice(-2).padStart(2, '_');
+  const rows = await rkcBotFile(week, `players/${shard}.json.gz`, true);
+  return rows?.[t] || null;
 }
 
 // ---- data ----
@@ -547,10 +993,20 @@ function rkcArmyData(t) {
     const code = repOf(g).code; let label = 'Army';
     try { label = infoOf(code).cls.core || infoOf(code).cls.strategy || 'Army'; } catch { /* keep default */ }
     let ic = []; try { ic = mainTroops(code, 5).map(([id]) => ckUrl((ARMY_IDS.troop[id] || [])[1])).filter(Boolean); } catch { /* no icons */ }
+    // Hydra has several real troop line-ups; show the troops used across its variants, like the Discord card.
+    if (/^hydra$/i.test(label) && g.vars?.size) {
+      const uses = [...g.vars.values()].reduce((n, v) => n + (v.uses || 0), 0), shares = new Map();
+      for (const v of g.vars.values()) {
+        let icons = []; try { icons = mainTroops(v.code, 5).map(([id]) => ckUrl((ARMY_IDS.troop[id] || [])[1])).filter(Boolean); } catch { /* skip undecodable variant */ }
+        for (const icon of new Set(icons)) shares.set(icon, (shares.get(icon) || 0) + (v.uses || 0));
+      }
+      const union = [...shares].filter(([, n]) => n >= uses * 0.1).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([icon]) => icon);
+      if (union.length) ic = union;
+    }
     return { key, label, icons: ic, players: g.players, uses: g.uses, st: g.st, s3: g.s3, pc: g.pc };
   });
   const openers = [...t.opener].sort((a, b) => b[1].n - a[1].n).slice(0, 5).map(([name, e]) => {
-    let ic = []; try { ic = rkcOpenerUrls(name, topCode(e.codes)); } catch { /* no icons */ }
+    let ic = []; try { ic = [...rkcOpenerHeroUrls(name), ...rkcOpenerUrls(name, topCode(e.codes))].slice(0, 5); } catch { /* no icons */ }
     return { name, n: e.n, s3: e.s3, st: e.st, icons: ic };
   });
   return { armies, openers, oTotal: [...t.opener.values()].reduce((a, e) => a + e.n, 0) };
@@ -566,6 +1022,22 @@ function rkcLeagues(lgPool, max = 3) {
 // Town hall card (no player): totals, top lists, players per league, most popular armies and openers. Same image as the bot's town hall stats.
 async function rkCardBuildTh(th) {
   const S = RKS.S; if (!S) return null;
+  // Prefer the same published scope and army files the Discord bot reads, so list order and percentages match exactly.
+  try {
+    const [scopeRaw, armyRaw] = await Promise.all([
+      rkcBotFile(RKS.week, `scopes/th${th}.json`), rkcBotFile(RKS.week, `armies/th${th}.json`),
+    ]);
+    const T = rkcBotScope(scopeRaw, th, RKS.week);
+    if (T?.G?.players) {
+      const armies = rkcMergeBotArmies(armyRaw, th), lgTop = rkcBotLeagues(T.leagues), tops = T.tops;
+      const gaOf = new Map(Object.values(tops).flat().map(r => [r.tag, r.ga ?? r.na]));
+      return { solo: true, th, inRange: true, S: T, G: T.G,
+        me: { tag: null, na: 0, s3: 0, nd: 0, dst: 0, dz: 0, name: '' }, lgMe: null, atk: 0, ranks: {}, tops,
+        gaOf, armies: armies.groups, openers: armies.openers, oTotal: armies.oTotal, withCode: armies.withCode,
+        myArmy: null, myOpener: null, lgTop, lgTotal: T.leagues.filter(l => !/^unranked$/i.test(l.name)).reduce((n, l) => n + (l.n || 0), 0),
+        name: `Town Hall ${th}`, week: RKS.week };
+    }
+  } catch (e) { console.warn('[townhall card] Bot stats unavailable; using crawl data:', e); }
   const T = await rkCardScope(th); if (!T || !T.B[rkIdx(th)] || !T.B[rkIdx(th)].players) return null;
   const pool = T.rows.filter((r) => r.th === th), lgPool = T.lg.filter((r) => r.th === th), allLeaguePlayers = T.leagueProfiles.filter((r) => r.th === th);
   const t = T.B[rkIdx(th)], { armies, openers, oTotal } = rkcArmyData(t), lg = rkcLeagues(allLeaguePlayers);
@@ -573,7 +1045,33 @@ async function rkCardBuildTh(th) {
     gaOf: new Map(lgPool.map((r) => [r.tag, r.ga])), armies, openers, oTotal, withCode: t.withCode, myArmy: null, myOpener: null, lgTop: lg.top, lgTotal: lg.total, name: `Town Hall ${th}`, week: RKS.week };
 }
 async function rkCardBuild(tag0) {
-  const S0 = RKS.S, tag = normTag(tag0), r0 = S0.rows.find((r) => r.tag === tag) || S0.rows.find((r) => normTag(r.tag) === tag);
+  const S0 = RKS.S, tag = normTag(tag0);
+  // Use the bot's per-player record, precomputed rank arrays, scope and army files when available.
+  try {
+    const rec = await rkcBotPlayer(tag, RKS.week);
+    if (rec) {
+      const th = rec.th || 0, inRange = th >= RK.MIN && th <= RK.MAX, scopeName = inRange ? `th${th}` : 'all';
+      const [scopeRaw, armyRaw] = await Promise.all([
+        rkcBotFile(RKS.week, `scopes/${scopeName}.json`), rkcBotFile(RKS.week, `armies/${scopeName}.json`),
+      ]);
+      const T = rkcBotScope(scopeRaw, th, RKS.week);
+      if (T) {
+        const armies = rkcMergeBotArmies(armyRaw, th), ranks = rkcBotRanks(rec, inRange ? 'th' : 'all');
+        const ga = Array.isArray(rec.gw) ? (+rec.gw[0] || 0) + (+rec.gw[1] || 0) : 0;
+        const atk = Math.max(ga, rec.na || 0), me = { ...rec, tag, na: rec.na || 0, nd: rec.nd || 0, s3: rec.s3 || 0, hasLg: rec.hasLg ?? !!rec.lid };
+        const ranksTops = [...(rec.armies || [])], armyKeys = ranksTops.map(a => a.key).filter(k => k != null);
+        const openNames = (rec.openers || []).map(o => o.name).filter(Boolean);
+        const gaOf = new Map(Object.values(T.tops).flat().map(r => [r.tag, r.ga ?? r.na]));
+        Object.assign(ranks, { tops: T.tops });
+        return { th, inRange, S: T, G: T.G, me, lgMe: me.hasLg ? me : null, atk, ranks, tops: T.tops, gaOf,
+          armies: armies.groups, openers: armies.openers, oTotal: armies.oTotal, withCode: armies.withCode,
+          myArmy: armyKeys[0] ?? rec.army ?? null, myArmyKeys: armyKeys, myOpener: openNames[0] ?? rec.opener ?? null, myOpenerNames: openNames,
+          lgTop: rkcBotLeagues(T.leagues), lgTotal: T.leagues.filter(l => !/^unranked$/i.test(l.name)).reduce((n, l) => n + (l.n || 0), 0),
+          name: rkcClean(me.name, tag), week: RKS.week };
+      }
+    }
+  } catch (e) { console.warn('[player card] Bot stats unavailable; using crawl data:', e); }
+  const r0 = S0.rows.find((r) => r.tag === tag) || S0.rows.find((r) => normTag(r.tag) === tag);
   if (!r0) return null;
   const th = r0.th, inRange = th >= RK.MIN && th <= RK.MAX, T = await rkCardScope(th);
   const pool = T.rows.filter((r) => !inRange || r.th === th), me = pool.find((r) => r.tag === r0.tag) || r0;
@@ -613,10 +1111,11 @@ async function rkcLoad(url) {
 }
 async function rkCardRender(d, cv, load = rkcLoad) {
   // solo card: the top lists grow from 5 to up to 10 rows (28px each) when there are that many players
-  const ROWS = d.solo ? Math.max(5, Math.min(10, ...['trophies', 'offtr', 'deftr'].map((k) => (d.tops[k] || []).length))) : 5;
+  const hasTr = !!(d.tops?.offtr && d.tops?.deftr);
+  const ROWS = d.solo ? Math.max(5, Math.min(10, ...['trophies', ...(hasTr ? ['offtr', 'deftr'] : ['most3', 'defense'])].map((k) => (d.tops[k] || []).length))) : 5;
   const { M, GAP, AH } = RKC, solo = !!d.solo, BASE_H = solo ? 794 + (ROWS - 5) * 28 : RKC.BASE_H, LGH = 176, W = 1600, CW = W - 2 * M, hasArmies = d.armies.length > 0 || d.openers.length > 0,
     lgTop = d.lgTop || [], hasLg = lgTop.length > 0,
-    hasChamp = isChamp(d.me.tag) || ['trophies', 'offtr', 'deftr'].some((k) => (d.tops[k] || []).slice(0, ROWS).some((r) => isChamp(r.tag))),
+    hasChamp = isChamp(d.me.tag) || ['trophies', 'offtr', 'deftr', 'attack', 'most3', 'defense'].some((k) => (d.tops[k] || []).slice(0, ROWS).some((r) => isChamp(r.tag))),
     H = BASE_H + (hasLg ? LGH + GAP : 0) + (hasArmies ? AH + GAP : 0) + (hasChamp || WORLD_CHAMPS[d.th] ? 30 : 0);
   cv.width = W; cv.height = H; const c = cv.getContext('2d'), { G, me, th } = d, atk = d.atk, logged = me.na, ranks = d.ranks, C = RKC_COL;
   c.textBaseline = 'alphabetic';
@@ -650,11 +1149,11 @@ async function rkCardRender(d, cv, load = rkcLoad) {
   if (solo) {
     rkcText(c, 'RANKED STATS', M, 72, 24, C.gold, { maxW: 600 });
     rkcText(c, d.name, M - 2, 150, 82, '#fff', { maxW: W - 2 * M - ICON - 40, min: 40 });
-    rkcText(c, `Week of ${wkLabel}${d.week.cur ? ' (live)' : ''}  ·  tracking top ${fmtN(G.players)} ${thLabel} players  |  legendstats.pages.dev`, M, 190, 22, 'rgba(255,255,255,.65)', { maxW: W - 2 * M - ICON - 40 });
+    rkcText(c, `Week of ${wkLabel}${d.week.cur ? ' (live)' : ''}  ·  tracking top ${fmtN(d.S.tracked || G.tracked || G.players)} ${thLabel} players  |  legendstats.pages.dev`, M, 190, 22, 'rgba(255,255,255,.65)', { maxW: W - 2 * M - ICON - 40 });
   } else {
   rkcText(c, `${thName} · RANKED STATS`, M, 72, 24, C.gold, { maxW: headW });
   { const ch = isChamp(d.me.tag); if (ch) rkcCrown(c, M, 142, 64); rkcText(c, d.name, M - 2 + (ch ? 80 : 0), 150, 82, '#fff', { maxW: headW - (ch ? 80 : 0), min: 40 }); }
-  rkcText(c, `#${String(me.tag).replace(/^#/, '')}  ·  Week of ${new Date(d.week.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}${d.week.cur ? ' (live)' : ''}  ·  tracking top ${fmtN(G.players)} ${thLabel} players  |  legendstats.pages.dev`, M, 190, 22, 'rgba(255,255,255,.65)', { maxW: headW });
+  rkcText(c, `#${String(me.tag).replace(/^#/, '')}  ·  Week of ${new Date(d.week.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}${d.week.cur ? ' (live)' : ''}  ·  tracking top ${fmtN(d.S.tracked || G.tracked || G.players)} ${thLabel} players  |  legendstats.pages.dev`, M, 190, 22, 'rgba(255,255,255,.65)', { maxW: headW });
   }
 
   // rank tiles
@@ -728,9 +1227,16 @@ async function rkCardRender(d, cv, load = rkcLoad) {
   const myRow = { tag: me.tag, name: me.name, s3: me.s3, na: logged, ga: atk, dst: me.dst, nd: me.nd, dz: me.dz, tr: d.lgMe?.tr || 0, ln: d.lgMe?.ln || '', ot: me.ot || 0, dt: me.dt || 0 };
   const gaOf = (r) => Math.max(d.gaOf.get(r.tag) ?? 0, r.na);
   const lists = [
-    ['TOP TROPHIES', 'trophies', (r) => fmtN(r.tr), (r) => String(r.ln || '').replace(/\s+league\b/i, ''), C.gold, !!d.lgMe, 'global'],
-    ['TOP OFFENSE TROPHIES', 'offtr', (r) => fmtN(r.ot), (r) => `${r.ga ?? gaOf(r)} atk`, C.orange, logged > 0],
-    ['TOP DEFENSE TROPHIES', 'deftr', (r) => fmtN(r.dt), (r) => `${r.dz}×0★ · ${r.nd} def`, C.blue, me.nd > 0],
+    d.tops?.trophies
+      ? ['TOP TROPHIES', 'trophies', (r) => fmtN(r.tr), (r) => String(r.ln || '').replace(/\s+league\b/i, ''), C.gold, !!d.lgMe, 'global']
+      : ['BEST 3★ RATE', 'attack', (r) => rkcPct(r.s3, r.na), (r) => `${r.ga ?? r.na} atk`, C.green, logged > 0],
+    ...(hasTr ? [
+      ['TOP OFFENSE TROPHIES', 'offtr', (r) => fmtN(r.ot), (r) => `${r.ga ?? gaOf(r)} atk`, C.orange, logged > 0],
+      ['TOP DEFENSE TROPHIES', 'deftr', (r) => fmtN(r.dt), (r) => `${r.dz}×0★ · ${r.nd} def`, C.blue, me.nd > 0],
+    ] : [
+      ['MOST 3★ ATTACKS', 'most3', (r) => `${r.s3}×3★`, (r) => `${r.ga ?? r.na} atk`, C.orange, logged > 0],
+      ['BEST DEFENSE', 'defense', (r) => `${rkcAvg(r.dst, r.nd)} ★`, (r) => `${r.dz}×0★ · ${r.nd} def`, C.blue, me.nd > 0],
+    ]),
   ];
   lists.forEach(([title, key, val, sub, col, hasStats, rk = key], i) => {
     const full = d.tops[key], x = M + i * (lw3 + GAP), lp = 24; rkcPanel(c, x, LY, lw3, LH, 'rgba(255,255,255,.06)');
@@ -782,12 +1288,12 @@ async function rkCardRender(d, cv, load = rkcLoad) {
     for (const [lab, x] of [['USED BY', cUse], ['3★ RATE', c3], ['★ / ATK', cSt], ['DEST.', cDe]]) rkcText(c, lab, x, headY, 13, C.dim, { align: 'right' });
     const IS = Math.min(36, rowH - 8), maxIc = Math.max(0, ...d.armies.map((a) => a.icons.length)), labX = M + pd2 + 30 + maxIc * (IS + 4) + 8;
     d.armies.forEach((a, k) => {
-      const top = rowTop0 + k * rowH, y = top + rowH * 0.66, mine = a.key === d.myArmy; hl(M, top, AW, mine, k);
+      const top = rowTop0 + k * rowH, y = top + rowH * 0.66, mine = (a.keys || [a.key]).some(key => (d.myArmyKeys || [d.myArmy]).includes(key)); hl(M, top, AW, mine, k);
       rkcText(c, String(k + 1), M + pd2, y, 17, mine ? C.gold : C.dim); let ix = M + pd2 + 30;
       a.icons.forEach((u) => { rkcImg(c, imgs.get(u), ix, top + (rowH - IS) / 2, IS, IS); ix += IS + 4; });
       rkcText(c, a.label, labX, y, 18, mine ? C.gold : '#fff', { maxW: cUse - 90 - labX });
       rkcText(c, rkcPct(a.players, d.withCode), cUse, y, 19, '#fff', { align: 'right' }); rkcText(c, rkcPct(a.s3, a.uses), c3, y, 19, C.green, { align: 'right' });
-      rkcText(c, rkcAvg(a.st, a.uses), cSt, y, 19, '#fff', { align: 'right' }); rkcText(c, `${rkcAvg(a.pc, a.uses, 0)}%`, cDe, y, 19, C.soft, { align: 'right' });
+      rkcText(c, rkcAvg(a.st, a.uses), cSt, y, 19, '#fff', { align: 'right' }); rkcText(c, `${rkcAvg(a.pct ?? a.pc, a.uses, 0)}%`, cDe, y, 19, C.soft, { align: 'right' });
     });
     if (!d.armies.length) rkcText(c, 'No army data yet', M + pd2, AY + 110, 18, C.dim);
 
@@ -796,7 +1302,7 @@ async function rkCardRender(d, cv, load = rkcLoad) {
     for (const [lab, x] of [['USED', oUse], ['3★ RATE', o3], ['★ / ATK', oSt]]) rkcText(c, lab, x, headY, 13, C.dim, { align: 'right' });
     const OIS = Math.min(30, rowH - 10), maxOp = Math.max(0, ...d.openers.map((o) => o.icons.length)), nameX = OX + pd2 + 28 + (maxOp ? maxOp * (OIS + 3) + 6 : 0);
     d.openers.forEach((o, k) => {
-      const top = rowTop0 + k * rowH, y = top + rowH * 0.66, mine = !!d.myOpener && o.name === d.myOpener; hl(OX, top, OW, mine, k);
+      const top = rowTop0 + k * rowH, y = top + rowH * 0.66, mine = !!d.myOpener && (o.names ? (d.myOpenerNames || [d.myOpener]).some(name => o.names.has(name)) : o.name === d.myOpener); hl(OX, top, OW, mine, k);
       rkcText(c, String(k + 1), OX + pd2, y, 17, mine ? C.gold : C.dim); let ox = OX + pd2 + 28;
       o.icons.forEach((u) => { rkcImg(c, imgs.get(u), ox, top + (rowH - OIS) / 2, OIS, OIS); ox += OIS + 3; });
       const nm = rkcClean(o.name, '?'), nmax = oUse - 62 - nameX, col = mine ? C.gold : '#fff';

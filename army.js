@@ -1,6 +1,8 @@
 // Army share-code decoder + army display (browser port of armyDecoder.js, using the generated ARMY_IDS table).
 // Icons are hosted by ClashKing (https://assets.clashk.ing) - credit them somewhere on the site.
 const ICON_BASE = 'https://assets.clashk.ing/';
+const ARMY_SQUAD_IDS = new Set(Object.entries(ARMY_IDS.troop).filter(([, entry]) => /\bSquad$/i.test(entry[0])).map(([id]) => Number(id)));
+const isSquadId = (id) => ARMY_SQUAD_IDS.has(Number(id));
 
 function armyPairs(section) {
   const out = [];

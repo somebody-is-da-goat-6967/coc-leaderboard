@@ -10,9 +10,8 @@ const armyIds = (sec) => (sec || '').split('-').map((p) => p.split('x')[1]).filt
 const secOf = (code, re) => re.exec(code)?.[1] || '';
 // Troop and siege ids overlap in the army link (e.g. 8 = Dragon and Battle Drill), so an id counts as a siege machine only when it is not a troop — same rule as the bot's armyDecoder.
 const isSiegeId = (id) => !!ARMY_IDS.siege[id] && !ARMY_IDS.troop[id];
-// Armies are grouped as the "same army" by their main-army troops only (see groupKey). Ignored: troop counts, heroes, pets,
-// equipment, spells, siege machines (main army or Clan Castle) and troops that only fill a small part of the army.
-// similarKey below is NOT used for grouping any more: it lists a single attack's ingredients (troops, spells, siege) for the per-ingredient stats.
+// Preferred armies are grouped by classified strategic core (see armyFamilyKey). Counts, support troops, heroes, pets,
+// equipment, spells, and siege variations stay together. similarKey remains for compact comparison keys and ingredient stats.
 const TROOP_HOUSING = {
   'Barbarian': 1, 'Archer': 1, 'Goblin': 1, 'Giant': 5, 'Wall Breaker': 2,
   'Balloon': 5, 'Wizard': 4, 'Healer': 14, 'Dragon': 20, 'P.E.K.K.A': 25,
@@ -63,20 +62,29 @@ function similarKey(code) {
   const spells = armyIds(secOf(code, /s([\dx-]*)/)).concat(armyIds(secLetter(code, CC_SPELLS)));
   return sortedNums(troops).join(',') + '|' + sortedNums(spells).join(',') + '|' + sortedNums(siege).join(',');
 }
-// Grouping key for "same army, different variation". ONLY the main-army troops decide it (Clan Castle contents, siege machines
-// and, unless GROUP_BY_SPELLS is on, spells never matter). A troop type is ignored when it fills less than MIN_TROOP_SPACE
-// housing space in the main army (a few wizards / wall breakers / archers) or less than MIN_TROOP_SHARE of the troop space.
-const MIN_TROOP_SPACE = 6;
-const GROUP_BY_SPELLS = false;
+// Group by the strategic core rather than an exact troop recipe. Small changes to counts,
+// support troops, siege, spells, heroes, pets, or equipment should strengthen the same sample.
+const armyFamilyCache = new Map();
+function armyFamilyKey(core) {
+  const raw = String(core || 'Mixed Army Smash').trim().toLowerCase();
+  const family = /root rider/.test(raw) ? 'root riders'
+    : /dragon rider/.test(raw) ? 'dragon riders'
+    : /lava hound|\blalo\b/.test(raw) ? 'lalo'
+    : /rocket balloon/.test(raw) ? 'rocket balloons'
+    : /super bowler/.test(raw) ? 'super bowlers'
+    : /super witch/.test(raw) ? 'super witches'
+    : /super yeti/.test(raw) ? 'super yetis'
+    : /super dragon/.test(raw) ? 'super dragons'
+    : /meteor golem/.test(raw) ? 'meteor golems'
+    : /thrower/.test(raw) ? 'throwers'
+    : /hybrid/.test(raw) ? 'hybrid'
+    : raw.replace(/\s+/g, ' ');
+  return `family:${family}`;
+}
 function groupKey(code) {
-  const cnt = new Map(); // main-army troops only (siege machines excluded): id -> count
-  for (const [id, n] of armyCounts(secOf(code, /u([\dx-]*)/))) if (!isSiegeId(id)) cnt.set(id, (cnt.get(id) || 0) + n);
-  const space = (id) => { const h = TROOP_HOUSING[(ARMY_IDS.troop[id] || [])[0]]; return h == null ? null : h * cnt.get(id); };
-  let total = 0; for (const id of cnt.keys()) total += space(id) || 0;
-  let troops = [...cnt.keys()].filter((id) => { const s = space(id); return s === null || (s >= MIN_TROOP_SPACE && s >= MIN_TROOP_SHARE * total); }); // unknown troops are always kept
-  if (!troops.length && cnt.size) troops = [[...cnt.keys()].sort((a, b) => (space(b) || 0) - (space(a) || 0))[0]]; // never end up with an empty army
-  const spells = GROUP_BY_SPELLS ? '|' + sortedNums(armyIds(secOf(code, /s([\dx-]*)/))).join(',') : '';
-  return sortedNums(troops).join(',') + spells;
+  if (armyFamilyCache.has(code)) return armyFamilyCache.get(code);
+  const heroes = decodeHeroes(code).map((h) => ({ name: heroNameOf(h), pet: h.pet?.name || null, equip: (h.equip || []).map((e) => e.name) }));
+  const key = armyFamilyKey(classifyArmy(code, heroes).core); armyFamilyCache.set(code, key); return key;
 }
 const siegeOf = (code) => sortedNums(armyIds(secOf(code, /u([\dx-]*)/)).concat(armyIds(secLetter(code, CC_UNITS))).filter(isSiegeId)); // main + Clan Castle, each machine once
 // ---------- heroes, openers and armies ----------
@@ -501,14 +509,15 @@ function infoOf(code) {
     const hn = heroNameOf(hh); if (hh.icon && !iconOf.has(hn)) iconOf.set(hn, hh.icon);
     heroes.push({ name: hn, pet: hh.pet ? hh.pet.name : null, equip: (hh.equip || []).map((e) => e.name) });
   }
-  c = { u, s, pets: [...pets], eq: [...eq], key: similarKey(code), group: groupKey(code), siege: siegeOf(code), duke, heroes, cls: classifyArmy(code, heroes) };
+  const cls = classifyArmy(code, heroes);
+  c = { u, s, pets: [...pets], eq: [...eq], key: similarKey(code), group: armyFamilyKey(cls.core), siege: siegeOf(code), duke, heroes, cls };
   infoCache.set(code, c); return c;
 }
 
 async function computeStats(dd, ranks, prevRanks, onProg = () => {}, cancelled = () => false) {
   const mk = () => ({ players: 0, att: 0, def: 0, aT: 0, dT: 0, st: 0, s3: 0, dz: 0, dsum: 0, dur: 0, withCode: 0,
     duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0, t: 0 })), comp: new Map(), hero: new Map(), opener: new Map(), strat: new Map(), shield: 0, shieldBroke: 0, noCode: 0, siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 },
-    armies: new Map(), troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
+    armies: new Map(), armyUsage: new Map(), troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
   const B = Array.from({ length: ALL + 1 }, mk);
   const G = { shield: 0, shieldBroke: 0, players: 0, att: 0, def: 0, aT: 0, dT: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0], dur: 0, durN: 0, pct: 0, full: 0, perfect: 0, hours: Array(24).fill(0), hours3: Array(24).fill(0),
     dur6: Array.from({ length: 6 }, () => [0, 0]), nth: Array.from({ length: 8 }, () => ({ n: 0, st: 0, s3: 0 })),
@@ -546,9 +555,13 @@ async function computeStats(dd, ranks, prevRanks, onProg = () => {}, cancelled =
       const oq = ranks && h.tag ? ranks.get(normTag(h.tag)) || 0 : 0, vi = oq ? BUCKETS.findIndex(([a, b]) => oq >= a && oq <= b) : BUCKETS.length;
       G.vsB[vi].n++; if (h.stars === 3) G.vsB[vi].s3++;
       if (h.code) { // per-attack stats by army ingredient (meaningful troops, siege, spells, pets, equipment) and Duke vs no Duke
-        const inf = infoOf(canonCode(h.code)), parts = inf.key.split('|').map((x) => (x ? x.split(',') : []));
+        const code = canonCode(h.code), inf = infoOf(code), parts = inf.key.split('|').map((x) => (x ? x.split(',') : []));
         const ids = [...parts[0], ...parts[2]].map((x) => 't' + x).concat(parts[1].map((x) => 's' + x), inf.pets.map((x) => 'p' + x), inf.eq.map((x) => 'e' + x));
         for (const t of targets) {
+          let usage = t.armyUsage.get(inf.group); if (!usage) t.armyUsage.set(inf.group, (usage = { uses: 0, tags: new Set(), vars: new Map() }));
+          usage.uses++; usage.tags.add(tag);
+          let variant = usage.vars.get(code); if (!variant) usage.vars.set(code, (variant = { code, uses: 0, tags: new Set() }));
+          variant.uses++; variant.tags.add(tag);
           const x = t.duke[inf.duke ? 1 : 0]; x.n++; x.st += h.stars; x.pct += h.pct; x.t += h.t; if (h.stars === 3) x.s3++;
           if (inf.siege.length) for (const id of inf.siege) { let c = t.siege.get(id); if (!c) t.siege.set(id, (c = { n: 0, s3: 0, st: 0 })); c.n++; c.st += h.stars; if (h.stars === 3) c.s3++; }
           else { t.noSiege.n++; t.noSiege.st += h.stars; if (h.stars === 3) t.noSiege.s3++; }
@@ -623,7 +636,12 @@ function lb(title, note, list) {
 }
 const LB_MAX = 100, ARMY_SHOW = 6, ARMY_MAX = 30; // rows shown when a box is expanded (collapsed: 10 rows / 6 armies)
 const expandBtn = (n, what, min = 10) => (n > min ? `<button class="btn xbtn" data-label="Show ${what} (${n})">Show ${what} (${n})</button>` : '');
-const topN = (arr, cmp, n = LB_MAX) => [...arr].sort(cmp).slice(0, n);
+const inRankPool = (rows) => state.rankScope ? rows.filter((r) => r.rank > 0 && r.rank <= state.rankScope) : rows;
+const topN = (arr, cmp, n = state.lbLimit || LB_MAX) => [...arr].sort((a, b) => state.boardOrder === 'rank' ? (a.rank || 1e9) - (b.rank || 1e9) || cmp(a, b) : cmp(a, b)).slice(0, n);
+function leaderboardLimitHTML() {
+  const options = [10, 100, 1000, 5000, 10000];
+  return `<div class="lb-controls"><label class="lb-limit">Global player pool <select id="rank-scope" aria-label="Choose global rank cohort"><option value="0"${state.rankScope === 0 ? ' selected' : ''}>All tracked players</option>${options.map((n) => `<option value="${n}"${state.rankScope === n ? ' selected' : ''}>Global top ${fmtN(n)}</option>`).join('')}</select></label><label class="lb-limit">Show top <select id="lb-limit" aria-label="Number of results in each metric leaderboard">${options.map((n) => `<option value="${n}"${state.lbLimit === n ? ' selected' : ''}>${fmtN(n)}</option>`).join('')}</select> results per leaderboard</label><label class="lb-limit">Order by <select id="lb-order" aria-label="Sort metric leaderboards by">${[['metric', 'Leaderboard stat'], ['rank', 'End-of-day rank']].map(([v, label]) => `<option value="${v}"${state.boardOrder === v ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div>`;
+}
 const tied = (rows, k) => { const m = Math.max(...rows.map((r) => r[k])), n = rows.filter((r) => r[k] === m).length; return n > 10 ? ` · ${fmtN(n)} players tied at +${m}, ordered by eod rank` : ''; };
 
 function overviewHTML(S) {
@@ -656,7 +674,8 @@ function placementHTML(S) {
 }
 
 function leaderboardsHTML(S) {
-  const R = S.rows, rk = (a, b) => tieRank(a.rank) - tieRank(b.rank);
+  const R = inRankPool(S.rows), fastRows = inRankPool(S.fast), upsetRows = inRankPool(S.upsets), rk = (a, b) => tieRank(a.rank) - tieRank(b.rank);
+  const scopeNote = state.rankScope ? `Metric lists are limited to the global top ${fmtN(state.rankScope)} from this day’s end-of-day leaderboard, then ranked by each stat.` : 'Choose a global rank pool to limit each stat leaderboard to those players.';
   const offense = topN(R, (a, b) => b.a - a.a || rk(a, b)).map((r) => ({ ...r, val: `+${r.a}`, cls: 'pos', ex: `${r.na}/8 attacks · ${r.s3}×3★` }));
   const defense = topN(R.filter((r) => r.nd >= 8), (a, b) => a.d - b.d || b.dz - a.dz || rk(a, b)).map((r) => ({ ...r, val: `−${r.d}`, cls: 'neg', ex: `${r.nd}/8 defenses · ${r.dz}×0★` }));
   const zero = topN(R, (a, b) => b.dz - a.dz || b.nd - a.nd || a.d - b.d || rk(a, b)).map((r) => ({ ...r, val: `${r.dz}×0★`, ex: `${r.nd} defenses · −${r.d}` }));
@@ -664,10 +683,10 @@ function leaderboardsHTML(S) {
   const mv = (r) => ({ ...r, val: `${r.delta > 0 ? '▲' : '▼'} ${fmtN(Math.abs(r.delta))}`, cls: r.delta > 0 ? 'pos' : 'neg', ex: `#${fmtN(r.prev)} → #${fmtN(r.rank)} · net ${fmt(r.net)}` });
   const moved = R.filter((r) => r.delta && Math.min(r.rank, r.prev) <= 2500);
   const climbers = topN(moved, (a, b) => b.delta - a.delta).map(mv), drops = topN(moved, (a, b) => a.delta - b.delta).map(mv);
-  const climbNote = moved.length ? 'Rank change since the previous end of day, for players in the top 2,500 on either day' : 'Needs two end-of-day snapshots';
-  const fastest = topN(S.fast, (a, b) => a.time - b.time || rk(a, b)).map((r) => ({ ...r, val: dur(r.time), ex: `${r.pct}% vs ${esc(r.opp)}` }));
-  const up = topN(S.upsets, (a, b) => b.rank - a.rank).map((r) => ({ ...r, val: `+${fmtN(r.rank - r.oppRank)}`, ex: `3★ vs ${esc(r.opp)} (eod #${r.oppRank})` }));
-  return `<h2 class="sh">Leaderboards</h2><div class="lbs xl">
+  const climbNote = moved.length ? 'Rank change since the previous end of day, for players in the top 2,500 on either day' : 'Needs two end-of-day snapshots from the same season';
+  const fastest = topN(fastRows, (a, b) => a.time - b.time || rk(a, b)).map((r) => ({ ...r, val: dur(r.time), ex: `${r.pct}% vs ${esc(r.opp)}` }));
+  const up = topN(upsetRows, (a, b) => b.rank - a.rank).map((r) => ({ ...r, val: `+${fmtN(r.rank - r.oppRank)}`, ex: `3★ vs ${esc(r.opp)} (eod #${r.oppRank})` }));
+  return `<div id="leaderboards"><h2 class="sh">Leaderboards</h2>${leaderboardLimitHTML()}<p class="sub">${scopeNote}</p><div class="lbs xl">
     ${lb('Top offense', `Most trophies gained from attacks${tied(R, 'a')}`, offense)}
     ${lb('Top defense', 'Fewest trophies lost, players with 8/8 defenses', defense)}
     ${lb('Most 0★ defenses', 'Attackers who got no stars at all', zero)}
@@ -676,7 +695,17 @@ function leaderboardsHTML(S) {
     ${lb('Biggest drops', climbNote, drops)}
     ${lb('Fastest 3★ attacks', 'Shortest battles that ended in a triple', fastest)}
     ${lb('Giant killers', '3★ attacks on a top-100 defender, biggest rank gap first (value = places between them)', up)}
-  </div>`;
+  </div></div>`;
+}
+
+function rankedPlayersHTML(S) {
+  const limits = [10, 100, 1000, 5000, 10000], max = state.rankLimit || 100;
+  const rows = S.rows.filter((r) => r.rank > 0).sort((a, b) => a.rank - b.rank).slice(0, max);
+  const attacks = rows.reduce((n, r) => n + r.na, 0), defenses = rows.reduce((n, r) => n + r.nd, 0), trophies = rows.reduce((n, r) => n + r.a, 0), lost = rows.reduce((n, r) => n + r.d, 0), triples = rows.reduce((n, r) => n + r.s3, 0);
+  return `<section class="panel" id="ranked-players"><div class="section-heading"><h3>Player stats by end-of-day rank</h3><label class="lb-limit">Show top <select id="rank-limit" aria-label="Number of top-ranked players">${limits.map((n) => `<option value="${n}"${max === n ? ' selected' : ''}>${fmtN(n)}</option>`).join('')}</select></label></div>
+    <p class="sub">Players are ordered by their end-of-day rank. The list includes tracked players who recorded battles${S.G.ranked ? `; ${fmtN(S.G.ranked)} players were ranked that day` : ''}.</p>
+    <div class="kpis">${kpi('Players shown', fmtN(rows.length), `top ${fmtN(max)} ranks`)}${kpi('Avg attack', `+${avgOf(trophies, attacks, 2)}`, `${fmtN(attacks)} attacks`, 'pos')}${kpi('Avg defense', `−${avgOf(lost, defenses, 2)}`, `${fmtN(defenses)} defenses`, 'neg')}${kpi('3★ rate', pctOf(triples, attacks), `${fmtN(triples)} triples`)}</div>
+    <div class="scroll"><table class="tbl"><thead><tr><th>Rank</th><th>Player</th><th>Attacks</th><th>Avg attack</th><th>Defenses</th><th>Avg defense</th><th>Net</th><th>3★</th></tr></thead><tbody>${rows.map((r) => `<tr><td>#${fmtN(r.rank)}</td><td>${who(r.tag, r.name, 0)}</td><td>${fmtN(r.na)}</td><td class="pos">+${avgOf(r.a, r.na, 2)}</td><td>${fmtN(r.nd)}</td><td class="neg">−${avgOf(r.d, r.nd, 2)}</td><td class="${r.net >= 0 ? 'pos' : 'neg'}">${fmt(r.net)}</td><td>${pctOf(r.s3, r.na)}</td></tr>`).join('') || '<tr><td colspan="8">No ranked players with battle data.</td></tr>'}</tbody></table></div></section>`;
 }
 
 function bucketTabs(sel) {
@@ -692,14 +721,14 @@ function armiesHTML(S, sel, sort) {
   const list = [...t.armies.values()].filter((g) => g.players >= minP && g.uses >= (sort === 'used' ? 1 : 10))
     .sort((a, b) => val(b) - val(a) || b.players - a.players || b.uses - a.uses).slice(0, ARMY_MAX);
   state.list = list;
-  const cards = list.map((g, i) => `<div class="acard${i >= ARMY_SHOW ? ' more' : ''}"><div class="ah"><b>#${i + 1}</b><span><em>${fmtN(g.players)}</em> player${g.players === 1 ? '' : 's'} · ${pctOf(g.players, t.withCode)} of ${bucketName(sel)} · ${fmtN(g.uses)} attack${g.uses === 1 ? '' : 's'}</span></div>
-      <div class="am">${statsLine(g)}</div>${ckArmy(repOf(g).code)}
+  const cards = list.map((g, i) => { const rep = repOf(g), family = infoOf(rep.code).cls.core || infoOf(rep.code).cls.strategy || 'Army family'; return `<div class="acard${i >= ARMY_SHOW ? ' more' : ''}"><div class="ah"><b>#${i + 1}</b><span><em>${fmtN(g.players)}</em> player${g.players === 1 ? '' : 's'} · ${pctOf(g.players, t.withCode)} of ${bucketName(sel)} · ${fmtN(g.uses)} attack${g.uses === 1 ? '' : 's'}</span></div>
+      <div class="army-family">${esc(family)}</div><div class="am">${statsLine(g)}</div>${ckArmy(rep.code)}
       ${g.vars.size > 1 ? `<button class="btn vbtn" data-g="${i}" aria-expanded="false">▸ ${fmtN(g.vars.size)} variations</button>` : '<small class="sub">Only one version used</small>'}
-      <div class="vars" id="vars${i}"></div></div>`).join('');
+      <div class="vars" id="vars${i}"></div></div>`; }).join('');
   return `<h2 class="sh">Top armies by placement</h2><section class="panel">
     <div class="controls">${bucketTabs(sel)}<div class="seg" id="sseg" role="group" aria-label="Sort armies">${Object.entries(SORTS).map(([k, v]) =>
       `<button data-s="${k}" aria-pressed="${k === sort}">${v}</button>`).join('')}</div></div>
-    <p class="sub">${fmtN(t.withCode)} ${bucketName(sel)} players, one army each: the one they used most today. Armies are grouped by their main-army troops only: troop counts, minor troops (under ${MIN_TROOP_SPACE} housing space), spells, siege machines (main army or Clan Castle), heroes, pets and equipment don’t split an army. The card shows the most popular version; click “variations” to see the others.${sort === 'used' ? '' : ' Needs a minimum number of players and 10+ attacks.'}</p>
+    <p class="sub">${fmtN(t.withCode)} ${bucketName(sel)} players, one preferred army family each. Similar troop recipes are grouped by strategic core; counts, support troops, siege, spells, heroes, pets and equipment variations stay together. Each card shows the most-used recipe, with other versions available below.${sort === 'used' ? '' : ' Performance sorts require a minimum player sample and 10+ attacks.'}</p>
     <div class="xp"><div class="acards">${cards || '<div class="msg">Not enough armies in this group yet.</div>'}</div>${expandBtn(list.length, 'more armies', ARMY_SHOW)}</div>
     ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, t.duke[0].n + t.duke[1].n)}${openerHTML(t, t.duke[0].n + t.duke[1].n)}</section>${strategyTopHTML(t, 3)}`;
 }
@@ -716,8 +745,11 @@ function metaHTML(t) {
     return `<div class="mrow${i >= 10 ? ' more' : ''}" data-tt="${esc(name)} · ${fmtN(c)} players (${pctOf(c, n)})">${ckTile(cat, name, icon)}<span class="mn">${esc(name)}</span><span class="mb"><i style="width:${(100 * c / n).toFixed(1)}%"></i></span><em>${pctOf(c, n)}</em></div>`;
   }).join('') || '<div class="msg">–</div>'}</div>${expandBtn(all.length, 'all')}</div>`; };
   const idn = (tbl) => (id) => tbl[id] || [`#${id}`, ''];
-  return `<h4 class="mh">What they bring <small>(share of players whose army includes it)</small></h4><div class="meta4">
-    ${col('Troops & siege', t.troop, (id) => ARMY_IDS.troop[id] || ARMY_IDS.siege[id] || [`#${id}`, ''], 'troop')}
+  const troops = new Map([...t.troop].filter(([id]) => !isSquadId(id)));
+  const squads = new Map([...t.troop].filter(([id]) => isSquadId(id)));
+  return `<h4 class="mh">What they bring <small>(share of players whose army includes it)</small></h4><div class="meta5">
+    ${col('Troops & siege', troops, (id) => ARMY_IDS.troop[id] || ARMY_IDS.siege[id] || [`#${id}`, ''], 'troop')}
+    ${col('Squads', squads, idn(ARMY_IDS.troop), 'troop')}
     ${col('Spells', t.spell, idn(ARMY_IDS.spell), 'spell')}
     ${col('Pets', t.pet, (n) => [n, iconOf.get(n) || ''], 'pet')}
     ${col('Hero equipment', t.equip, (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
@@ -726,7 +758,6 @@ function metaHTML(t) {
 // ---------- extra stats: Dragon Duke, charts, ingredient performance ----------
 const GREEN = '#1a8f4c', RED = '#c2362f', GOLD = '#e0a526', GREY = '#8a9a9c';
 const rate = (a, b) => (b ? (100 * a) / b : 0);
-const pp = (x) => `${x >= 0 ? '+' : '−'}${fmtN(Math.abs(x), 1)} pp`;
 function vcols(items, max) { // vertical bar chart; each item: { label, top, segs: [[value, color]...], tt }
   const mx = max || Math.max(1, ...items.map((it) => it.segs.reduce((a, s) => a + s[0], 0)));
   return `<div class="vc">${items.map((it) => `<div class="vcc" data-tt="${esc(it.tt)}"><small>${it.top ?? ''}</small><div class="vcb">${it.segs.map(([v, c]) =>
@@ -751,26 +782,6 @@ function shieldHTML(S) {
     <p class="shield-note">A Legend shield means no Legend League battles that day (shielded players can still attack and be attacked in normal mode, which isn’t tracked here). Checked ${SHIELD_CHECK_MIN} minutes after the 05:00 UTC reset: everyone without a battle by then is a candidate, and anyone who then has a Legend attack or defense during the rest of the day broke the rule and is removed.${S.live ? ' The day is still running, so this count can only go down.' : ''} Players are counted from the end-of-day leaderboard: ranked, but with no Legend battle at all. Rank rows use end-of-day rank.</p>
     <div class="scroll"><table class="tbl"><thead><tr><th>Rank</th><th>Tracked</th><th>Quiet at check</th><th>Removed</th><th>Shielded</th><th>Share</th></tr></thead><tbody>${rows.map(line).join('')}</tbody></table></div></section>`;
 }
-function dukeHTML(S) {
-  const rows = [...BUCKETS.keys(), ALL].map((i) => { const [no, yes] = S.B[i].duke; return { i, no, yes }; }), A = rows[rows.length - 1];
-  if (!A.yes.n) return `<section class="panel"><h3>Dragon Duke</h3><p class="sub">No attacks with the Dragon Duke found among ${fmtN(A.no.n)} attacks that have an army link. If you expect some, check that the hero decodes with “Duke” in its name (DUKE_RE in stats.js).</p></section>`;
-  const r3 = (x) => rate(x.s3, x.n), diff = (y, n) => (y.n && n.n ? pp(r3(y) - r3(n)) : '–');
-  const cls2 = (y, n) => (y.n && n.n ? (r3(y) >= r3(n) ? 'pos' : 'neg') : '');
-  const line = ({ i, no, yes }) => `<tr><td>${bucketName(i)}</td><td>${pctOf(yes.n, yes.n + no.n)} <small>(${fmtN(yes.n)})</small></td><td>${pctOf(yes.s3, yes.n)}</td><td>${pctOf(no.s3, no.n)}</td>
-    <td class="${cls2(yes, no)}">${diff(yes, no)}</td><td>${avgOf(yes.st, yes.n, 2)}</td><td>${avgOf(no.st, no.n, 2)}</td><td>${avgOf(yes.pct, yes.n, 1)}%</td><td>${avgOf(no.pct, no.n, 1)}%</td><td>+${avgOf(yes.t, yes.n)}</td><td>+${avgOf(no.t, no.n)}</td></tr>`;
-  const pairs = rows.filter((r) => r.yes.n >= 5 && r.no.n >= 5).map((r) => `<div class="hb2" data-tt="${esc(`${bucketName(r.i)} · with Duke ${pctOf(r.yes.s3, r.yes.n)} (${fmtN(r.yes.n)} attacks) · without ${pctOf(r.no.s3, r.no.n)} (${fmtN(r.no.n)} attacks)`)}"><span>${bucketName(r.i)}</span>
-    <div class="bw"><div class="a"><i style="width:${r3(r.yes).toFixed(1)}%"></i></div><div class="b"><i style="width:${r3(r.no).toFixed(1)}%"></i></div></div><em>${fmtN(r3(r.yes), 1)}% vs ${fmtN(r3(r.no), 1)}%</em></div>`).join('');
-  return `<section class="panel"><h3>Dragon Duke vs no Duke</h3><div class="kpis">
-    ${kpi('Duke usage', pctOf(A.yes.n, A.yes.n + A.no.n), `${fmtN(A.yes.n)} of ${fmtN(A.yes.n + A.no.n)} attacks`)}
-    ${kpi('3★ with Duke', pctOf(A.yes.s3, A.yes.n), `${avgOf(A.yes.st, A.yes.n, 2)} ★ per attack`, 'pos')}
-    ${kpi('3★ without Duke', pctOf(A.no.s3, A.no.n), `${avgOf(A.no.st, A.no.n, 2)} ★ per attack`)}
-    ${kpi('Difference', diff(A.yes, A.no), 'in 3★ rate (percentage points)', cls2(A.yes, A.no))}</div>
-    <p class="sub">Per attack, using the army link of each attack (attacks without an army link are left out). Players who pick the Duke may simply be better players, so this shows what happened, not what the Duke causes.</p>
-    <div class="scroll"><table class="tbl"><thead><tr><th>Rank</th><th>Duke usage</th><th>3★ with</th><th>3★ without</th><th>Difference</th><th>★ with</th><th>★ without</th><th>Destruction with</th><th>Destruction without</th><th>Trophies with</th><th>Trophies without</th></tr></thead>
-    <tbody>${rows.map(line).join('')}</tbody></table></div>
-    ${pairs ? `<h4>3★ rate by placement <small class="lg"><i class="a"></i>with Duke <i class="b"></i>without Duke</small></h4>${pairs}` : ''}</section>`;
-}
-
 function chartsHTML(S) {
   const { G } = S, pad = (h) => String(h).padStart(2, '0'), hrs = Array.from({ length: 24 }, (_, i) => (5 + i) % 24);
   const t30 = (i) => `${Math.floor(i / 2)}:${i % 2 ? '30' : '00'}`;
@@ -814,14 +825,14 @@ function siegeHTML(t) {
 
 function compHTML(t) {
   const base = t.duke[0].n + t.duke[1].n, minN = Math.max(10, Math.round(base * 0.01));
-  const col = (title, pre, resolve, cat) => {
-    const all = [...t.comp].filter(([k, v]) => k[0] === pre && v.n >= minN).sort((a, b) => rate(b[1].s3, b[1].n) - rate(a[1].s3, a[1].n) || b[1].n - a[1].n);
+  const col = (title, pre, resolve, cat, keep = () => true) => {
+    const all = [...t.comp].filter(([k, v]) => k[0] === pre && keep(k.slice(1)) && v.n >= minN).sort((a, b) => rate(b[1].s3, b[1].n) - rate(a[1].s3, a[1].n) || b[1].n - a[1].n);
     return `<div class="mcol xp"><h4>${title}</h4><div class="mlist">${all.map(([k, v], i) => { const [name, icon] = resolve(k.slice(1));
       return `<div class="mrow${i >= 10 ? ' more' : ''}" data-tt="${esc(name)} · ${pctOf(v.s3, v.n)} 3★ · ${avgOf(v.st, v.n, 2)} ★ · ${fmtN(v.n)} attacks (${pctOf(v.n, base)} of attacks)">${ckTile(cat, name, icon)}<span class="mn">${esc(name)}</span><span class="mb"><i style="width:${rate(v.s3, v.n).toFixed(1)}%"></i></span><em>${pctOf(v.s3, v.n)}</em></div>`; }).join('') || '<div class="msg">–</div>'}</div>${expandBtn(all.length, 'all')}</div>`;
   };
   const byId = (...tbls) => (id) => { for (const tb of tbls) if (tb[id]) return tb[id]; return [`#${id}`, '']; };
-  return `<h4 class="mh">How each one performs <small>(3★ rate of attacks that used it, at least ${fmtN(minN)} attacks; minor troops are left out)</small></h4><div class="meta4">
-    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop')}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
+  return `<h4 class="mh">How each one performs <small>(3★ rate of attacks that used it, at least ${fmtN(minN)} attacks; minor troops are left out)</small></h4><div class="meta5">
+    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop', (id) => !isSquadId(id))}${col('Squads', 't', byId(ARMY_IDS.troop), 'troop', isSquadId)}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
     ${col('Pets', 'p', (n) => [n, iconOf.get(n) || ''], 'pet')}${col('Hero equipment', 'e', (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
 }
 
@@ -927,24 +938,37 @@ function initTips() {
 }
 
 // ---------- page ----------
-const state = { list: [], S: null, bucket: ALL, sort: 'used', dd: null, eod: null };
+const state = { list: [], S: null, bucket: ALL, sort: 'used', dd: null, eod: null, rankLimit: 100, lbLimit: 100, boardOrder: 'metric', rankScope: 0 };
 let loadId = 0;
 function draw() {
   const { S } = state; if (!S) return;
   $('out').innerHTML = !S.G.players ? '<div class="msg">No battle data for this day yet.</div>'
     : buildPage([
-      ['glance', 'At a glance', 'Totals, results and when everyone attacks — plus who sat the day out behind a shield.', overviewHTML(S) + shieldHTML(S)],
+      ['glance', 'At a glance', 'Totals, results and when everyone attacks.', overviewHTML(S)],
       ['charts', 'The day in charts', 'Stars, trophies and how army choices play out.', chartsHTML(S)],
-      ['players', 'Placement &amp; leaderboards', 'Who climbed, who dropped and who played best.', placementHTML(S) + leaderboardsHTML(S)],
-      ['armies', 'Armies &amp; strategies', 'What the best players bring, and who performs best with each strategy.', dukeHTML(S) + `<div id="armies">${armiesHTML(S, state.bucket, state.sort)}</div>`]], [['ch-strats', 'Top performers']]);
+      ['placement', 'By placement', 'Compare results across end-of-day rank groups.', placementHTML(S)],
+      ['players', 'Leaderboards', 'Player records and stats ordered by end-of-day rank.', rankedPlayersHTML(S) + leaderboardsHTML(S)],
+      ['armies', 'Armies &amp; strategies', 'What players bring, and who performs best with each strategy.', `<div id="armies">${armiesHTML(S, state.bucket, state.sort)}</div>`],
+      ['shields', 'Shield watch', 'Shield activity for this Legend Day.', shieldHTML(S)]], [['ch-strats', 'Top performers']]);
 }
 function drawArmies() { // only the armies block changes when the tabs are clicked
   const holder = document.getElementById('armies'); if (!holder) return draw();
   holder.innerHTML = armiesHTML(state.S, state.bucket, state.sort);
 }
-async function load(value) {
+async function load(value, forceLive = false) {
   const id = ++loadId; prog.cur = 0; $('out').innerHTML = ''; setProgress(2, 'Crunching the battle logs… finding the day');
+  const refresh = $('refreshStats'); if (refresh) { refresh.disabled = true; refresh.textContent = forceLive ? 'Computing in browser…' : 'Loading stats…'; }
   try {
+    if (!forceLive) {
+      try {
+        const packed = await getComputed('daily', value === 'live' ? 'live.json.gz' : `${value}.json.gz`);
+        if (id !== loadId) return;
+        state.S = packed.S; state.eod = null; state.dd = null; setProgress(100, 'Done'); draw();
+        const dataAge = ageLabel(packed.sourceGeneratedAt), builtAge = ageLabel(packed.computedAt);
+        $('foot').innerHTML = `Precomputed daily stats · stats built ${esc(builtAge)} · source battle data updated ${esc(dataAge)} · end-of-day rankings from the matching snapshot · ${BUILD} · icons by <a href="https://assets.clashk.ing" target="_blank" rel="noopener">ClashKing</a>`;
+        return;
+      } catch { /* compute from crawler files when no saved result is available */ }
+    }
     const idx = await getIndex(), back = value === 'live' ? 0 : Math.round((Date.parse(idx.live.dayStart) - Date.parse(value + 'T05:00:00Z')) / CONFIG.DAY) + 1;
     setProgress(6, 'Crunching the battle logs… downloading battles');
     let dd; const creep = setInterval(() => { if (prog.cur < 54) setProgress(prog.cur + (54 - prog.cur) * 0.07); }, 250); // download size is unknown: ease towards 54%
@@ -955,7 +979,7 @@ async function load(value) {
     if (id !== loadId) return;
     let prev = null;
     setProgress(63, 'Crunching the battle logs… comparing with the previous day');
-    try { const dates = (await getMeta()).endOfDayDates || [], i = eod ? dates.indexOf(eod.date) : -1; if (i > 0) prev = await eodRanks(dates[i - 1]); } catch { /* optional */ }
+    try { if (eod) prev = await getPrevEodRanks(eod.date); } catch { /* optional */ }
     if (id !== loadId) return;
     setProgress(68, 'Crunching the battle logs… analysing attacks');
     const S = await computeStats(dd, eod && eod.ranks, prev, (f) => { if (id === loadId) setProgress(68 + 31 * f); }, () => id !== loadId);
@@ -965,8 +989,9 @@ async function load(value) {
     draw();
     const age = dd.generatedAt ? Math.max(0, Math.round((Date.now() - dd.generatedAt) / 60000)) : null;
     $('foot').innerHTML = `Legend Day ${new Date(dd.start).toISOString().slice(0, 10)} 05:00 UTC → ${new Date(dd.end).toISOString().slice(0, 10)} 05:00 UTC${age === null ? '' : ` · battle data ${age} min old`
-      } · ${eod ? `ranks from the ${esc(eod.date)} reset` : 'no end-of-day ranks for this day'} · stats cover players the crawler tracks · ${BUILD} · icons by <a href="https://assets.clashk.ing" target="_blank" rel="noopener">ClashKing</a>`;
+      } · computed in your browser now · ${eod ? `ranks from the ${esc(eod.date)} reset` : 'no end-of-day ranks for this day'} · stats cover players the crawler tracks · ${BUILD} · icons by <a href="https://assets.clashk.ing" target="_blank" rel="noopener">ClashKing</a>`;
   } catch (e) { if (id === loadId) $('out').innerHTML = `<div class="msg">Couldn’t load stats: ${esc(e.message)}</div>`; }
+  finally { if (refresh) { refresh.disabled = false; refresh.textContent = 'Refresh · compute live'; } }
 }
 async function initStats() {
   injectStyles(); initTips(); initNav();
@@ -977,6 +1002,7 @@ async function initStats() {
     sel.innerHTML = `<option value="live">Today (in progress)</option>` + dates.map((d) => `<option value="${d}">Day ended ${md(d)} 05:00 UTC</option>`).join('');
   } catch { sel.innerHTML = '<option value="live">Today (in progress)</option>'; }
   sel.onchange = () => load(sel.value);
+  $('refreshStats').onclick = () => load(sel.value, true);
   document.addEventListener('click', (e) => {
     const x = e.target.closest?.('.xbtn');
     if (x) { const open = x.closest('.xp').classList.toggle('open'); x.textContent = open ? 'Show less' : x.dataset.label; return; }
@@ -989,6 +1015,28 @@ async function initStats() {
     const b = e.target.closest?.('#bseg button, #sseg button'); if (!b) return;
     if (b.dataset.b != null) state.bucket = +b.dataset.b; if (b.dataset.s) state.sort = b.dataset.s;
     drawArmies();
+  });
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'rank-limit') {
+      state.rankLimit = Number(e.target.value);
+      const holder = document.getElementById('ranked-players'); if (holder) holder.outerHTML = rankedPlayersHTML(state.S);
+      return;
+    }
+    if (e.target.id === 'rank-scope') {
+      state.rankScope = Number(e.target.value);
+      const holder = document.getElementById('leaderboards'); if (holder) holder.outerHTML = leaderboardsHTML(state.S);
+      return;
+    }
+    if (e.target.id === 'lb-limit') {
+      state.lbLimit = Number(e.target.value);
+      const holder = document.getElementById('leaderboards'); if (holder) holder.outerHTML = leaderboardsHTML(state.S);
+      return;
+    }
+    if (e.target.id === 'lb-order') {
+      state.boardOrder = e.target.value;
+      const holder = document.getElementById('leaderboards'); if (holder) holder.outerHTML = leaderboardsHTML(state.S);
+      return;
+    }
   });
   load(sel.value);
 }

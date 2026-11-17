@@ -745,8 +745,11 @@ function metaHTML(t) {
     return `<div class="mrow${i >= 10 ? ' more' : ''}" data-tt="${esc(name)} · ${fmtN(c)} players (${pctOf(c, n)})">${ckTile(cat, name, icon)}<span class="mn">${esc(name)}</span><span class="mb"><i style="width:${(100 * c / n).toFixed(1)}%"></i></span><em>${pctOf(c, n)}</em></div>`;
   }).join('') || '<div class="msg">–</div>'}</div>${expandBtn(all.length, 'all')}</div>`; };
   const idn = (tbl) => (id) => tbl[id] || [`#${id}`, ''];
-  return `<h4 class="mh">What they bring <small>(share of players whose army includes it)</small></h4><div class="meta4">
-    ${col('Troops & siege', t.troop, (id) => ARMY_IDS.troop[id] || ARMY_IDS.siege[id] || [`#${id}`, ''], 'troop')}
+  const troops = new Map([...t.troop].filter(([id]) => !isSquadId(id)));
+  const squads = new Map([...t.troop].filter(([id]) => isSquadId(id)));
+  return `<h4 class="mh">What they bring <small>(share of players whose army includes it)</small></h4><div class="meta5">
+    ${col('Troops & siege', troops, (id) => ARMY_IDS.troop[id] || ARMY_IDS.siege[id] || [`#${id}`, ''], 'troop')}
+    ${col('Squads', squads, idn(ARMY_IDS.troop), 'troop')}
     ${col('Spells', t.spell, idn(ARMY_IDS.spell), 'spell')}
     ${col('Pets', t.pet, (n) => [n, iconOf.get(n) || ''], 'pet')}
     ${col('Hero equipment', t.equip, (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
@@ -822,14 +825,14 @@ function siegeHTML(t) {
 
 function compHTML(t) {
   const base = t.duke[0].n + t.duke[1].n, minN = Math.max(10, Math.round(base * 0.01));
-  const col = (title, pre, resolve, cat) => {
-    const all = [...t.comp].filter(([k, v]) => k[0] === pre && v.n >= minN).sort((a, b) => rate(b[1].s3, b[1].n) - rate(a[1].s3, a[1].n) || b[1].n - a[1].n);
+  const col = (title, pre, resolve, cat, keep = () => true) => {
+    const all = [...t.comp].filter(([k, v]) => k[0] === pre && keep(k.slice(1)) && v.n >= minN).sort((a, b) => rate(b[1].s3, b[1].n) - rate(a[1].s3, a[1].n) || b[1].n - a[1].n);
     return `<div class="mcol xp"><h4>${title}</h4><div class="mlist">${all.map(([k, v], i) => { const [name, icon] = resolve(k.slice(1));
       return `<div class="mrow${i >= 10 ? ' more' : ''}" data-tt="${esc(name)} · ${pctOf(v.s3, v.n)} 3★ · ${avgOf(v.st, v.n, 2)} ★ · ${fmtN(v.n)} attacks (${pctOf(v.n, base)} of attacks)">${ckTile(cat, name, icon)}<span class="mn">${esc(name)}</span><span class="mb"><i style="width:${rate(v.s3, v.n).toFixed(1)}%"></i></span><em>${pctOf(v.s3, v.n)}</em></div>`; }).join('') || '<div class="msg">–</div>'}</div>${expandBtn(all.length, 'all')}</div>`;
   };
   const byId = (...tbls) => (id) => { for (const tb of tbls) if (tb[id]) return tb[id]; return [`#${id}`, '']; };
-  return `<h4 class="mh">How each one performs <small>(3★ rate of attacks that used it, at least ${fmtN(minN)} attacks; minor troops are left out)</small></h4><div class="meta4">
-    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop')}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
+  return `<h4 class="mh">How each one performs <small>(3★ rate of attacks that used it, at least ${fmtN(minN)} attacks; minor troops are left out)</small></h4><div class="meta5">
+    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop', (id) => !isSquadId(id))}${col('Squads', 't', byId(ARMY_IDS.troop), 'troop', isSquadId)}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
     ${col('Pets', 'p', (n) => [n, iconOf.get(n) || ''], 'pet')}${col('Hero equipment', 'e', (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
 }
 

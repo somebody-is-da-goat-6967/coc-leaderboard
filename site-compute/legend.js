@@ -15,6 +15,10 @@ const CONFIG = {
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const normTag = (t) => String(t || '').replace(/^#/, '').toUpperCase();
+const isLegendOneLeague = (name) => {
+  const normalized = String(name || '').toLowerCase().replace(/\bleague\b/g, '').replace(/\s+/g, ' ').trim();
+  return ['legend', 'legend i', 'legend 1'].includes(normalized);
+};
 // ---- World Champions: these players get a crown next to their name (hover it on the site for the label) ----
 // Per town hall: tags (any case, # optional) and the names listed on that town hall's images.
 const WORLD_CHAMPS = {
