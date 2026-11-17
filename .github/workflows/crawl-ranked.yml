@@ -41,10 +41,13 @@ jobs:
         run: |
           URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           git clone --depth 1 --branch ranked-data "$URL" data-out || { mkdir data-out; git -C data-out init -q -b ranked-data; git -C data-out remote add origin "$URL"; }
+      - name: Fetch current Legend I roster
+        run: curl --fail --silent --show-error --location "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/leaderboard.json" --output legend-seeds.json
       - name: Crawl ranked
         env:
           COC_API_KEY_RANKED: ${{ secrets.COC_API_KEY_RANKED }}
           SEED_FILE: scanner/clashspot-townhall-tags-detailed.json
+          LEGEND_SEED_FILE: legend-seeds.json
           LIMIT: ${{ github.event.inputs.limit || '0' }}
           MODE: ${{ steps.plan.outputs.mode }}          # trophies | battlelogs | catchup (read by ranked-crawl.mjs)
           MAX_MINUTES: ${{ steps.plan.outputs.budget }}

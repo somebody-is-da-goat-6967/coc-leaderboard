@@ -33,6 +33,7 @@ const env = process.env;
 const API_BASE = (env.COC_API_BASE || 'https://cocproxy.royaleapi.dev/v1').replace(/\/$/, '');
 const API_KEY = env.COC_API_KEY_RANKED || env.COC_API_KEY; // the ranked crawl has its own key
 const SEED_FILE = env.SEED_FILE || 'seeds/clashspot-townhall-tags.json';
+const LEGEND_SEED_FILE = env.LEGEND_SEED_FILE || '';
 const OUT = env.DATA_DIR || 'data-out';
 const CONCURRENCY = Number(env.CONCURRENCY) || 25;
 const MAX_MINUTES = Number(env.MAX_MINUTES) || 100;
@@ -87,6 +88,16 @@ function loadSeeds() {
     for (const th of Object.keys(raw)) for (const wk of Object.keys(raw[th])) for (const t of raw[th][wk]) rows.push([wk, +th, norm(t)]);
     rows.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0)); // newest week first, so the latest TH wins
     for (const [, th, tag] of rows) if (!map.has(tag)) map.set(tag, th);
+  }
+  // The detailed ClashSpot seed is refreshed less often than the live Legend I roster.
+  // Add current Legend I tags so new TH18/TH19 players get profiled and placed in their TH shard.
+  if (LEGEND_SEED_FILE) {
+    const roster = JSON.parse(fs.readFileSync(LEGEND_SEED_FILE, 'utf8'));
+    for (const player of roster.players || []) {
+      if (!player.tag) continue;
+      const tag = norm(player.tag);
+      if (!map.has(tag)) map.set(tag, null);
+    }
   }
   return map;
 }
