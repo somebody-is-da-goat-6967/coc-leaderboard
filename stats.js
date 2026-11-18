@@ -378,6 +378,15 @@ function tallyArmyStats(t, inf, code, w, st, s3) { // w attacks that used this a
   const o = tl(t.opener, inf.cls.openerRaw); add(o); if (!o.codes) o.codes = new Map(); noteCode(o.codes, code, w);
   const a = tl(t.strat, inf.cls.strategy); add(a); if (!a.codes) a.codes = new Map(); noteCode(a.codes, code, w);
 }
+function tallySquadStats(t, inf, code, w, st, s3) {
+  for (const id of new Set(inf.u.filter(isSquadId))) {
+    let q = t.squads.get(id); if (!q) t.squads.set(id, (q = { n: 0, st: 0, s3: 0, armies: new Map() }));
+    q.n += w; q.st += st; q.s3 += s3;
+    const name = inf.cls.strategy || 'Unknown Build'; let a = q.armies.get(name);
+    if (!a) q.armies.set(name, (a = { n: 0, st: 0, s3: 0, codes: new Map() }));
+    a.n += w; a.st += st; a.s3 += s3; noteCode(a.codes, code, w);
+  }
+}
 
 // ---- icons: main troops of an army, key parts of an opener ----
 const SUPPORT_TROOPS = new Set(['Healer', 'Baby Dragon', 'Drop Ship']);
@@ -516,7 +525,7 @@ function infoOf(code) {
 
 async function computeStats(dd, ranks, prevRanks, onProg = () => {}, cancelled = () => false) {
   const mk = () => ({ players: 0, att: 0, def: 0, aT: 0, dT: 0, st: 0, s3: 0, dz: 0, dsum: 0, dur: 0, withCode: 0,
-    duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0, t: 0 })), comp: new Map(), hero: new Map(), opener: new Map(), strat: new Map(), shield: 0, shieldBroke: 0, noCode: 0, siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 },
+    duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0, t: 0 })), comp: new Map(), squads: new Map(), hero: new Map(), opener: new Map(), strat: new Map(), shield: 0, shieldBroke: 0, noCode: 0, siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 },
     armies: new Map(), armyUsage: new Map(), troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
   const B = Array.from({ length: ALL + 1 }, mk);
   const G = { shield: 0, shieldBroke: 0, players: 0, att: 0, def: 0, aT: 0, dT: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0], dur: 0, durN: 0, pct: 0, full: 0, perfect: 0, hours: Array(24).fill(0), hours3: Array(24).fill(0),
@@ -566,6 +575,7 @@ async function computeStats(dd, ranks, prevRanks, onProg = () => {}, cancelled =
           if (inf.siege.length) for (const id of inf.siege) { let c = t.siege.get(id); if (!c) t.siege.set(id, (c = { n: 0, s3: 0, st: 0 })); c.n++; c.st += h.stars; if (h.stars === 3) c.s3++; }
           else { t.noSiege.n++; t.noSiege.st += h.stars; if (h.stars === 3) t.noSiege.s3++; }
           tallyArmyStats(t, inf, canonCode(h.code), 1, h.stars, h.stars === 3 ? 1 : 0); noteStratPlayer(t, inf, tag, row.name, rank, 1, h.stars, h.stars === 3 ? 1 : 0, h.t);
+          tallySquadStats(t, inf, canonCode(h.code), 1, h.stars, h.stars === 3 ? 1 : 0);
           for (const id of ids) { let c = t.comp.get(id); if (!c) t.comp.set(id, (c = { n: 0, s3: 0, st: 0 })); c.n++; c.st += h.stars; if (h.stars === 3) c.s3++; }
         }
       } else for (const t of targets) t.noCode++;
@@ -730,7 +740,7 @@ function armiesHTML(S, sel, sort) {
       `<button data-s="${k}" aria-pressed="${k === sort}">${v}</button>`).join('')}</div></div>
     <p class="sub">${fmtN(t.withCode)} ${bucketName(sel)} players, one preferred army family each. Similar troop recipes are grouped by strategic core; counts, support troops, siege, spells, heroes, pets and equipment variations stay together. Each card shows the most-used recipe, with other versions available below.${sort === 'used' ? '' : ' Performance sorts require a minimum player sample and 10+ attacks.'}</p>
     <div class="xp"><div class="acards">${cards || '<div class="msg">Not enough armies in this group yet.</div>'}</div>${expandBtn(list.length, 'more armies', ARMY_SHOW)}</div>
-    ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, t.duke[0].n + t.duke[1].n)}${openerHTML(t, t.duke[0].n + t.duke[1].n)}</section>${strategyTopHTML(t, 3)}`;
+    ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, t.duke[0].n + t.duke[1].n)}${openerHTML(t, t.duke[0].n + t.duke[1].n)}</section>${strategyTopHTML(t, 3)}${squadHTML(t)}`;
 }
 function variantsHTML(g) {
   const vs = [...g.vars.values()].sort((a, b) => b.players - a.players || b.uses - a.uses), shown = vs.slice(0, 40);
@@ -746,10 +756,8 @@ function metaHTML(t) {
   }).join('') || '<div class="msg">–</div>'}</div>${expandBtn(all.length, 'all')}</div>`; };
   const idn = (tbl) => (id) => tbl[id] || [`#${id}`, ''];
   const troops = new Map([...t.troop].filter(([id]) => !isSquadId(id)));
-  const squads = new Map([...t.troop].filter(([id]) => isSquadId(id)));
   return `<h4 class="mh">What they bring <small>(share of players whose army includes it)</small></h4><div class="meta5">
     ${col('Troops & siege', troops, (id) => ARMY_IDS.troop[id] || ARMY_IDS.siege[id] || [`#${id}`, ''], 'troop')}
-    ${col('Squads', squads, idn(ARMY_IDS.troop), 'troop')}
     ${col('Spells', t.spell, idn(ARMY_IDS.spell), 'spell')}
     ${col('Pets', t.pet, (n) => [n, iconOf.get(n) || ''], 'pet')}
     ${col('Hero equipment', t.equip, (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
@@ -832,8 +840,25 @@ function compHTML(t) {
   };
   const byId = (...tbls) => (id) => { for (const tb of tbls) if (tb[id]) return tb[id]; return [`#${id}`, '']; };
   return `<h4 class="mh">How each one performs <small>(3★ rate of attacks that used it, at least ${fmtN(minN)} attacks; minor troops are left out)</small></h4><div class="meta5">
-    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop', (id) => !isSquadId(id))}${col('Squads', 't', byId(ARMY_IDS.troop), 'troop', isSquadId)}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
+    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop', (id) => !isSquadId(id))}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
     ${col('Pets', 'p', (n) => [n, iconOf.get(n) || ''], 'pet')}${col('Hero equipment', 'e', (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
+}
+
+function squadHTML(t) {
+  const source = t.squads || new Map([...(t.comp || new Map())].flatMap(([key, v]) => {
+    const id = key[0] === 't' ? +key.slice(1) : NaN;
+    return isSquadId(id) ? [[id, { ...v, armies: new Map() }]] : [];
+  }));
+  const squads = [...source].sort((a, b) => b[1].n - a[1].n);
+  if (!squads.length) return `<div id="ch-squads"><h2 class="sh">Squad stats</h2><section class="panel"><div class="msg">No squad attacks recorded.</div></section></div>`;
+  const cards = squads.map(([id, q]) => {
+    const [name, icon] = ARMY_IDS.troop[id] || [`#${id}`, ''];
+    const arms = [...q.armies].sort((a, b) => b[1].n - a[1].n), minN = Math.max(5, Math.round(q.n * .01));
+    const top = new Set(arms.filter(([, a]) => a.n >= minN).sort((a, b) => rate(b[1].s3, b[1].n) - rate(a[1].s3, a[1].n) || b[1].n - a[1].n).slice(0, 3).map(([label]) => label));
+    const rows = arms.map(([label, a], i) => `<div class="srow${i >= 3 ? ' more' : ''}"><div class="sr1"><span class="sn">${esc(label)}${top.has(label) ? ' <b class="pos">Top 3★</b>' : ''}</span><span>${fmtN(a.n)} atk · ${pctOf(a.n, q.n)}</span><b>${pctOf(a.s3, a.n)}</b></div><div class="sr2"><div class="sbar"><i style="width:${rate(a.s3, a.n).toFixed(1)}%"></i></div><em>${avgOf(a.st, a.n, 2)} ★</em></div><div class="icons">${armyIcons(topCode(a.codes))}</div></div>`).join('');
+    return `<article class="scard xp"><div class="sch"><span>${ckTile('troop', name, icon)}</span><div><b>${esc(name)}</b><small>${fmtN(q.n)} attacks · ${pctOf(q.n, t.duke[0].n + t.duke[1].n)} of coded attacks · ${pctOf(q.s3, q.n)} 3★ · ${avgOf(q.st, q.n, 2)} ★</small></div></div><div class="lb">${rows}</div>${expandBtn(arms.length, 'more armies', 3)}</article>`;
+  }).join('');
+  return `<div id="ch-squads"><h2 class="sh">Squad stats</h2><section class="panel"><p class="sub">Squad usage and results across every coded attack. Army strategies show how often each squad appeared; top 3★ strategies require at least 5 attacks or 1% of that squad’s usage.${t.squads ? '' : ' Refresh live to compute the army breakdown for this saved snapshot.'}</p><div class="sgrid2">${cards}</div></section></div>`;
 }
 
 // ---------- v2 layout: chapters + sticky nav, top performers per strategy ----------
@@ -949,7 +974,7 @@ function draw() {
       ['placement', 'By placement', 'Compare results across end-of-day rank groups.', placementHTML(S)],
       ['players', 'Leaderboards', 'Player records and stats ordered by end-of-day rank.', rankedPlayersHTML(S) + leaderboardsHTML(S)],
       ['armies', 'Armies &amp; strategies', 'What players bring, and who performs best with each strategy.', `<div id="armies">${armiesHTML(S, state.bucket, state.sort)}</div>`],
-      ['shields', 'Shield watch', 'Shield activity for this Legend Day.', shieldHTML(S)]], [['ch-strats', 'Top performers']]);
+      ['shields', 'Shield watch', 'Shield activity for this Legend Day.', shieldHTML(S)]], [['ch-strats', 'Top performers'], ['ch-squads', 'Squads']]);
 }
 function drawArmies() { // only the armies block changes when the tabs are clicked
   const holder = document.getElementById('armies'); if (!holder) return draw();
