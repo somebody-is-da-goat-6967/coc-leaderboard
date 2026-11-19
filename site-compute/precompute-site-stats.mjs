@@ -109,6 +109,73 @@ function installArmyDaySummarizer(context) {
   };`, context);
 }
 
+// Army strategy of the highest avg-offense players + best performers per strategy (feeds /legendstats).
+// Strategy names follow the community naming: 15+ Balloons = LaLo, LaLo with a few Dragons = Drag LaLo.
+// Everything else keeps the site's own army family (Super Bowlers, Root Riders, Dragon Riders, ...).
+const LALO_MIN_BALLOONS = 15, DRAG_LALO_MIN_DRAGONS = 2;
+function installArmyPerformers(context) {
+  vm.runInContext(`globalThis.__armyPerformers = function(agg, cfg) {
+    const { minAttacks, keepPlayers, keepStrategies, keepPerformers, performerMinAttacks, laloBalloons, dragLaloDragons } = cfg;
+    const KNOWN = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons',
+      'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons' };
+    const labels = new Map();
+    const labelOf = (code) => {
+      let hit = labels.get(code); if (hit) return hit;
+      const inf = infoOf(code), counts = new Map();
+      for (const [id, n] of armyCounts(secOf(code, /u([\\dx-]*)/))) {
+        if (isSiegeId(id)) continue;
+        const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
+      }
+      const balloons = counts.get('Balloon') || 0, dragons = counts.get('Dragon') || 0;
+      const family = String(inf.group || '').replace(/^family:/, '');
+      let label;
+      if (balloons >= laloBalloons) label = dragons >= dragLaloDragons ? 'Drag LaLo' : 'LaLo';
+      else if (family === 'lalo') label = 'Lava Hound Mix';
+      else label = KNOWN[family] || family.replace(/\\b\\w/g, (c) => c.toUpperCase());
+      if (labels.size > 400000) labels.clear();
+      labels.set(code, label); return label;
+    };
+    const SKIP = new Set(['Farming Army', 'Unknown Build', 'Unknown']);
+    const strategies = new Map(), rows = [];
+    for (const [tag, p] of Object.entries(agg.players || {})) {
+      if (!(p.na || p.nd)) continue;
+      const mine = new Map(); let coded = 0;
+      for (const [ci, v] of Object.entries(p.arm || {})) {
+        const code = agg.codes[+ci]; if (!code) continue;
+        const label = labelOf(code); coded += v[0];
+        let m = mine.get(label); if (!m) mine.set(label, (m = { label, n: 0, st: 0, s3: 0, t: 0, code: '', codeN: -1 }));
+        m.n += v[0]; m.st += v[1]; m.s3 += v[2]; m.t += v[3];
+        if (v[0] > m.codeN) { m.codeN = v[0]; m.code = code; }
+        let g = strategies.get(label); if (!g) strategies.set(label, (g = { label, n: 0, st: 0, s3: 0, t: 0, players: new Map(), codes: new Map() }));
+        g.n += v[0]; g.st += v[1]; g.s3 += v[2]; g.t += v[3];
+        if (g.codes.has(code) || g.codes.size < 300) g.codes.set(code, (g.codes.get(code) || 0) + v[0]);
+      }
+      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: p.r || 0, n: m.n, st: m.st, s3: m.s3, t: m.t });
+      if (p.na >= minAttacks && p.dy > 0) rows.push({ tag, p, mine: [...mine.values()].sort((a, b) => b.n - a.n || b.st - a.st), coded });
+    }
+    rows.sort((a, b) => b.p.a / b.p.dy - a.p.a / a.p.dy || (a.p.r || 1e9) - (b.p.r || 1e9));
+    const avgOffense = rows.slice(0, keepPlayers).map(({ tag, p, mine, coded }) => {
+      const top = mine[0] || null;
+      return { tag, name: p.n || tag, rank: p.r || 0, perDay: +(p.a / p.dy).toFixed(2), days: p.dy, attacks: p.na, triples: p.s3,
+        strategy: top ? top.label : null, strategyAttacks: top ? top.n : 0, share: top && coded ? +(top.n / coded).toFixed(3) : 0,
+        tripleRate: top && top.n ? +(100 * top.s3 / top.n).toFixed(1) : null, code: top ? top.code : '',
+        mix: mine.slice(0, 3).map((m) => ({ label: m.label, attacks: m.n })) };
+    });
+    const mixMap = new Map();
+    for (const r of avgOffense) { const k = r.strategy || 'Unknown'; let x = mixMap.get(k); if (!x) mixMap.set(k, (x = { label: k, players: 0, perDay: 0 })); x.players++; x.perDay += r.perDay; }
+    const mix = [...mixMap.values()].map((x) => ({ label: x.label, players: x.players, avgPerDay: +(x.perDay / x.players).toFixed(2) })).sort((a, b) => b.players - a.players || b.avgPerDay - a.avgPerDay);
+    const topCode = (codes) => { let best = '', bn = -1; for (const [c, n] of codes) if (n > bn) { best = c; bn = n; } return best; };
+    const cards = [...strategies.values()].filter((g) => !SKIP.has(g.label)).sort((a, b) => b.n - a.n).slice(0, keepStrategies).map((g) => ({
+      label: g.label, players: g.players.size, attacks: g.n, triples: g.s3, tripleRate: +(100 * g.s3 / g.n).toFixed(1), avgStars: +(g.st / g.n).toFixed(2), code: topCode(g.codes),
+      performers: [...g.players.values()].filter((x) => x.n >= performerMinAttacks)
+        .sort((a, b) => wilson(b.s3, b.n) - wilson(a.s3, a.n) || b.st / b.n - a.st / a.n || b.n - a.n).slice(0, keepPerformers)
+        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1) })),
+    }));
+    const codedAttacks = [...strategies.values()].reduce((n, g) => n + g.n, 0);
+    return { minAttacks, performerMinAttacks, laloBalloons, dragLaloDragons, codedAttacks, avgOffense, mix, strategies: cards };
+  };`, context);
+}
+
 function precomputeArmyTrend(dayRows) {
   const dates = dayRows.map((d) => d.date), codedAttacks = dayRows.map((d) => d.codedAttacks || 0), codedTotal = codedAttacks.reduce((a, b) => a + b, 0), armies = new Map(), openers = new Map();
   dayRows.forEach((day, di) => {
@@ -373,6 +440,7 @@ async function wintraders() {
 async function season() {
   const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
   installArmyDaySummarizer(context);
+  installArmyPerformers(context);
   const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
   const repo = 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard';
   for (const n of [current, current - 1]) {
@@ -393,6 +461,7 @@ async function season() {
     }
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows);
+    const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 10, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
     writeJson(`leaderboards/${key}.json`, {
@@ -401,6 +470,7 @@ async function season() {
       computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null,
       leaderboards: seasonLeaderboards(S),
       armyTrend: S.armyTrend,
+      armyPerformers,
     });
 
   }
