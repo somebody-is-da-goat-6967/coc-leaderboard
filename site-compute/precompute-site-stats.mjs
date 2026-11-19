@@ -91,6 +91,48 @@ function sameSeason(dateA, dateB, anchor, seasonDays) {
   return dateA && dateB && idx(dateA) === idx(dateB);
 }
 
+function installArmyDaySummarizer(context) {
+  vm.runInContext(`globalThis.__summarizeArmyDay = function(date, players) {
+    const armies = {}, openers = {}; let codedAttacks = 0;
+    const add = (map, key, code, triple) => {
+      const x = map[key] || (map[key] = { uses: 0, triples: 0, variants: {} });
+      x.uses++; if (triple) x.triples++;
+      if (code) x.variants[code] = (x.variants[code] || 0) + 1;
+    };
+    for (const player of Object.values(players || {})) for (const hit of player.attacks || []) {
+      const code = hit.armyShareCode; if (!code) continue;
+      const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++;
+      add(armies, info.group, code, triple);
+      add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', '', triple);
+    }
+    return { date: String(date).slice(0, 10), codedAttacks, armies, openers };
+  };`, context);
+}
+
+function precomputeArmyTrend(dayRows) {
+  const dates = dayRows.map((d) => d.date), codedAttacks = dayRows.map((d) => d.codedAttacks || 0), codedTotal = codedAttacks.reduce((a, b) => a + b, 0), armies = new Map(), openers = new Map();
+  dayRows.forEach((day, di) => {
+    for (const [map, values] of [[armies, day.armies || {}], [openers, day.openers || {}]]) for (const [key, v] of Object.entries(values)) {
+      let x = map.get(key); if (!x) map.set(key, (x = { key, uses: 0, triples: 0, variants: new Map(), daily: Array.from({ length: dayRows.length }, () => ({ uses: 0, triples: 0 })) }));
+      x.uses += v.uses || 0; x.triples += v.triples || 0; x.daily[di].uses = v.uses || 0; x.daily[di].triples = v.triples || 0;
+      for (const [code, n] of Object.entries(v.variants || {})) x.variants.set(code, (x.variants.get(code) || 0) + n);
+    }
+  });
+  const pct = (n, d) => d ? 100 * n / d : 0;
+  const familyLabel = (key) => {
+    const family = String(key).replace(/^family:/, ''), known = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons', lalo: 'Lalo' };
+    return known[family] || family.replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+  const armyRows = [...armies.values()].map((x) => {
+    const code = [...x.variants].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+    return { key: x.key, code, label: familyLabel(x.key), uses: x.uses, usageRate: pct(x.uses, codedTotal), triples: x.triples, tripleRate: pct(x.triples, x.uses),
+      daily: x.daily.map((v, i) => ({ uses: v.uses, usageRate: pct(v.uses, codedAttacks[i]), triples: v.triples, tripleRate: v.uses ? pct(v.triples, v.uses) : null })) };
+  }).sort((a, b) => b.uses - a.uses);
+  const openerRows = [...openers.values()].map((x) => ({ key: x.key, label: x.key, uses: x.uses, usageRate: pct(x.uses, codedTotal),
+    daily: x.daily.map((v, i) => ({ uses: v.uses, usageRate: pct(v.uses, codedAttacks[i]) })) })).sort((a, b) => b.uses - a.uses);
+  return { dates, codedAttacks, codedAttackTotal: codedTotal, armies: armyRows, openers: openerRows };
+}
+
 async function daily() {
   const idx = readJson(path.join(dataDir, 'battlelogs', 'index.json'));
   const meta = readJson(path.join(dataDir, 'meta.json'));
@@ -314,6 +356,7 @@ async function wintraders() {
 
 async function season() {
   const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
+  installArmyDaySummarizer(context);
   const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
   const repo = 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard';
   for (const n of [current, current - 1]) {
@@ -321,7 +364,21 @@ async function season() {
     const raw = await fetchRemoteJson(url, true);
     if (!raw) { console.log(`[precompute:season] missing season ${key}`); continue; }
     const S = await call(context, 'computeSeason(__input.agg, () => {}, () => false)', { agg: raw });
-    writeGz(`${key}.json.gz`, { schema: 1, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
+    const archiveBase = `${repo}/archive-s${key}`;
+    const archiveDates = (raw.days || []).map((d) => String(d).slice(0, 10)).sort();
+    const dayRows = [];
+    for (const date of archiveDates) {
+      const local = path.join(dataDir, `archive-s${key}`, 'days', `${date}.json.gz`);
+      let dayRaw;
+      if (exists(local)) dayRaw = readGz(local);
+      else dayRaw = await fetchRemoteJson(`${archiveBase}/days/${date}.json.gz`, true);
+      if (!dayRaw) throw new Error(`Could not load archived season battlelog ${date}.`);
+      dayRows.push(await call(context, '__summarizeArmyDay(__input.date, __input.players)', { date, players: dayRaw.players || {} }));
+    }
+    if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
+    S.armyTrend = precomputeArmyTrend(dayRows);
+    console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
+    writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
     writeJson(`leaderboards/${key}.json`, {
       schema: 1, kind: 'season-leaderboards', key, season: S.agg?.season || key,
       days: S.agg?.days?.length || 0, lengthDays: S.agg?.lengthDays || 28,
