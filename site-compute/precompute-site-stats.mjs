@@ -103,7 +103,7 @@ function installArmyDaySummarizer(context) {
       const code = hit.armyShareCode; if (!code) continue;
       const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++;
       add(armies, info.group, code, triple);
-      add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', '', triple);
+      add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', code, triple);
     }
     return { date: String(date).slice(0, 10), codedAttacks, armies, openers };
   };`, context);
@@ -128,8 +128,24 @@ function precomputeArmyTrend(dayRows) {
     return { key: x.key, code, label: familyLabel(x.key), uses: x.uses, usageRate: pct(x.uses, codedTotal), triples: x.triples, tripleRate: pct(x.triples, x.uses),
       daily: x.daily.map((v, i) => ({ uses: v.uses, usageRate: pct(v.uses, codedAttacks[i]), triples: v.triples, tripleRate: v.uses ? pct(v.triples, v.uses) : null })) };
   }).sort((a, b) => b.uses - a.uses);
-  const openerRows = [...openers.values()].map((x) => ({ key: x.key, label: x.key, uses: x.uses, usageRate: pct(x.uses, codedTotal),
-    daily: x.daily.map((v, i) => ({ uses: v.uses, usageRate: pct(v.uses, codedAttacks[i]) })) })).sort((a, b) => b.uses - a.uses);
+  const openerRows = [...openers.values()].map((x) => {
+    const code = [...x.variants].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+    const info = code ? infoOf(code) : null;
+    const iconParts = (OPENER_PARTS[x.key] || []).flatMap(([category, name]) => {
+      if (name === '@queen' || name === '@duke' || name === '@rc') {
+        const heroName = name === '@queen' ? 'Archer Queen' : name === '@duke' ? 'Dragon Duke' : 'Royal Champion';
+        const hero = info?.heroes.find((h) => h.name === heroName);
+        return [{ category: 'hero', name: heroName }, ...(hero?.pet ? [{ category: 'pet', name: hero.pet }] : [])];
+      }
+      if (name === '@revenge') {
+        const equip = info?.heroes.find((h) => h.name === 'Dragon Duke')?.equip.find((g) => /revenge/i.test(g));
+        return equip ? [{ category: 'equipment', name: equip }] : [];
+      }
+      return [{ category: category === 'equip' ? 'equipment' : category, name }];
+    });
+    return { key: x.key, label: x.key, code, iconParts, uses: x.uses, triples: x.triples, tripleRate: pct(x.triples, x.uses), usageRate: pct(x.uses, codedTotal),
+      daily: x.daily.map((v, i) => ({ uses: v.uses, triples: v.triples, usageRate: pct(v.uses, codedAttacks[i]), tripleRate: v.uses ? pct(v.triples, v.uses) : null })) };
+  }).sort((a, b) => b.uses - a.uses);
   return { dates, codedAttacks, codedAttackTotal: codedTotal, armies: armyRows, openers: openerRows };
 }
 
