@@ -384,6 +384,7 @@ async function season() {
       days: S.agg?.days?.length || 0, lengthDays: S.agg?.lengthDays || 28,
       computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null,
       leaderboards: seasonLeaderboards(S),
+      armyTrend: S.armyTrend,
     });
 
   }
