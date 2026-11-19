@@ -80,7 +80,7 @@ const defTrophies = (stars, pct) => (stars >= 3 ? 0 : stars <= 0 ? 40 : 40 - atk
 // ---------- statistics ----------
 async function rkCompute(sets, week, onProg, cancelled) {
   const mk = () => ({ tracked: 0, players: 0, att: 0, def: 0, st: 0, s3: 0, pct: 0, dz: 0, dsum: 0, dur: 0, durN: 0, withCode: 0, noCode: 0,
-    duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0 })), comp: new Map(), hero: new Map(), opener: new Map(), strat: new Map(),
+    duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, pct: 0 })), comp: new Map(), squads: new Map(), hero: new Map(), opener: new Map(), strat: new Map(),
     siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 }, armies: new Map(), troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
   const B = Array.from({ length: RKN + 1 }, mk);
   const G = { tracked: 0, locked: 0, players: 0, active: 0, att: 0, def: 0, st: 0, pct: 0, dur: 0, durN: 0, astars: [0, 0, 0, 0], dstars: [0, 0, 0, 0],
@@ -145,6 +145,7 @@ async function rkCompute(sets, week, onProg, cancelled) {
             if (inf.siege.length) for (const id of inf.siege) { let c = t.siege.get(id); if (!c) t.siege.set(id, (c = { n: 0, s3: 0, st: 0 })); c.n++; c.st += h.stars; c.s3 += s3; }
             else { t.noSiege.n++; t.noSiege.st += h.stars; t.noSiege.s3 += s3; }
             tallyArmyStats(t, inf, cd, 1, h.stars, s3); noteStratPlayer(t, inf, tag, name, 0, 1, h.stars, s3, h.pct);
+            tallySquadStats(t, inf, cd, 1, h.stars, s3);
             for (const id of ids) { let c = t.comp.get(id); if (!c) t.comp.set(id, (c = { n: 0, s3: 0, st: 0 })); c.n++; c.st += h.stars; c.s3 += s3; }
           }
           { const on = inf.cls && inf.cls.openerRaw; if (on) myOp.set(on, (myOp.get(on) || 0) + 1); }
@@ -340,7 +341,7 @@ function rkArmies(S, sel, sort) {
     <div class="controls">${rkTabs(S, sel)}<div class="seg" id="sseg" role="group" aria-label="Sort armies">${Object.entries(RK_SORTS).map(([k, v]) => `<button data-s="${k}" aria-pressed="${k === sort}">${v}</button>`).join('')}</div></div>
     <p class="sub">${fmtN(t.withCode)} ${gname} players, one preferred army family each. Similar troop recipes are grouped by strategic core; counts, support troops, squads, siege, spells, heroes, pets and equipment variations stay together. The breakdown below lists squads separately from regular troops and siege. Each card shows the most-used recipe, with other versions in its variations. Card numbers show average stars, 3★ rate, average destruction and battle time.${sort === 'used' ? '' : ' Performance sorts require a minimum player sample and 10+ attacks.'}</p>
     <div class="xp"><div class="acards">${cards || '<div class="msg">Not enough armies in this group yet.</div>'}</div>${expandBtn(list.length, 'more armies', ARMY_SHOW)}</div>
-    ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, base)}${openerHTML(t, base)}</section>${rkStrategyTop(t, 10)}`;
+    ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, base)}${openerHTML(t, base)}</section>${rkStrategyTop(t, 10)}${squadHTML(t)}`;
 }
 function rkVariants(g) {
   const vs = [...g.vars.values()].sort((a, b) => b.players - a.players || b.uses - a.uses), shown = vs.slice(0, 40);
@@ -369,7 +370,7 @@ function rkDraw() {
       ['league', 'League leaderboard', 'Browse tracked players by league, trophies and Town Hall.', rkLeague(S)],
       ['cards', 'Shareable cards', 'Create a player or Town Hall ranked week card.', rkCardPanel() + rkThCardPanel()],
       ['players', 'Player leaderboards', 'Find the top weekly attackers and defenders.', rkLeaderboards(S)],
-      ['armies', 'Armies &amp; strategies', 'What players bring, and who performs best with each strategy.', rkDuke(S) + `<div id="armies">${rkArmies(S, RKS.group, RKS.sort)}</div>`]], [['ch-strats', 'Top performers']]);
+      ['armies', 'Armies &amp; strategies', 'What players bring, and who performs best with each strategy.', rkDuke(S) + `<div id="armies">${rkArmies(S, RKS.group, RKS.sort)}</div>`]], [['ch-strats', 'Top performers'], ['ch-squads', 'Squads']]);
   if (S.G.players) { const th = RKS.sel === 'all' ? RK.MAX : +RKS.sel; requestAnimationFrame(() => rkThCardShow(th)); }
 }
 function rkDrawArmies() { const h = document.getElementById('armies'); if (!h) return rkDraw(); h.innerHTML = rkArmies(RKS.S, RKS.group, RKS.sort); }

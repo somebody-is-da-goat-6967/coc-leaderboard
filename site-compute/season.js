@@ -369,6 +369,15 @@ function tallyArmyStats(t, inf, code, w, st, s3) { // w attacks that used this a
   const o = tl(t.opener, inf.cls.openerRaw); add(o); if (!o.codes) o.codes = new Map(); noteCode(o.codes, code, w);
   const a = tl(t.strat, inf.cls.strategy); add(a); if (!a.codes) a.codes = new Map(); noteCode(a.codes, code, w);
 }
+function tallySquadStats(t, inf, code, w, st, s3) {
+  for (const id of new Set(inf.u.filter(isSquadId))) {
+    let q = t.squads.get(id); if (!q) t.squads.set(id, (q = { n: 0, st: 0, s3: 0, armies: new Map() }));
+    q.n += w; q.st += st; q.s3 += s3;
+    const name = inf.cls.strategy || 'Unknown Build'; let a = q.armies.get(name);
+    if (!a) q.armies.set(name, (a = { n: 0, st: 0, s3: 0, codes: new Map() }));
+    a.n += w; a.st += st; a.s3 += s3; noteCode(a.codes, code, w);
+  }
+}
 
 // ---- icons: main troops of an army, key parts of an opener ----
 const SUPPORT_TROOPS = new Set(['Healer', 'Baby Dragon', 'Drop Ship']);
@@ -509,7 +518,7 @@ function infoOf(code) {
 // ---------- compute ----------
 async function computeSeason(agg, onProgress = () => {}, cancelled = () => false) {
   const mk = () => ({ players: 0, na: 0, nd: 0, a: 0, d: 0, dy: 0, st: 0, s3: 0, dz: 0, ds: 0, withCode: 0,
-    groups: new Map(), attCode: 0, duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, t: 0 })), comp: new Map(), hero: new Map(), opener: new Map(), strat: new Map(), siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 }, troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
+    groups: new Map(), attCode: 0, duke: [0, 1].map(() => ({ n: 0, st: 0, s3: 0, t: 0 })), comp: new Map(), squads: new Map(), hero: new Map(), opener: new Map(), strat: new Map(), siege: new Map(), noSiege: { n: 0, st: 0, s3: 0 }, troop: new Map(), spell: new Map(), pet: new Map(), equip: new Map() });
   const B = Array.from({ length: ALL + 1 }, mk), rows = [];
   const players = Object.entries(agg.players || {}).filter(([, p]) => p.na || p.nd); let processed = 0;
   for (const [tag, p] of players) {
@@ -536,6 +545,7 @@ async function computeSeason(agg, onProgress = () => {}, cancelled = () => false
         if (inf.siege.length) for (const id of inf.siege) { let x = t.siege.get(id); if (!x) t.siege.set(id, (x = { n: 0, st: 0, s3: 0 })); x.n += v[0]; x.st += v[1]; x.s3 += v[2]; }
         else { t.noSiege.n += v[0]; t.noSiege.st += v[1]; t.noSiege.s3 += v[2]; }
         tallyArmyStats(t, inf, c, v[0], v[1], v[2]); noteStratPlayer(t, inf, tag, p.n, p.r || 0, v[0], v[1], v[2], v[3]);
+        tallySquadStats(t, inf, c, v[0], v[1], v[2]);
       }
     }
     // ONE army per player: the one they used most all season (ties: more stars).
@@ -725,6 +735,86 @@ function groupList(t, sort) {
   return [...t.groups.values()].filter((g) => g.players >= minP && g.uses >= (sort === 'used' ? 1 : 8))
     .sort((a, b) => val(b) - val(a) || b.players - a.players || b.uses - a.uses).slice(0, ARMY_MAX);
 }
+const seasonArmyTotals = new WeakMap();
+function allSeasonArmyTotals(S) {
+  if (seasonArmyTotals.has(S)) return seasonArmyTotals.get(S);
+  const totals = new Map(), agg = S.agg || {};
+  for (const p of Object.values(agg.players || {})) for (const [ci, v] of Object.entries(p.arm || {})) {
+    const code = agg.codes?.[+ci]; if (!code || !Array.isArray(v)) continue;
+    const key = groupKey(code); let g = totals.get(key);
+    if (!g) totals.set(key, (g = { uses: 0, s3: 0, variants: new Map() }));
+    g.uses += Number(v[0]) || 0; g.s3 += Number(v[2]) || 0;
+    let variant = g.variants.get(code); if (!variant) g.variants.set(code, (variant = { uses: 0 }));
+    variant.uses += Number(v[0]) || 0;
+  }
+  const list = [...totals.values()].sort((a, b) => b.uses - a.uses);
+  for (const g of list) g.code = [...g.variants].sort((a, b) => b[1].uses - a[1].uses)[0]?.[0] || '';
+  seasonArmyTotals.set(S, list);
+  return list;
+}
+function armyFamilyLabel(code) {
+  const info = infoOf(code), raw = info.cls.core || info.cls.strategy || 'Army family', key = info.group;
+  const names = { 'family:throwers': 'Throwers', 'family:super bowlers': 'Super Bowlers', 'family:super witches': 'Super Witches', 'family:super yetis': 'Super Yetis', 'family:super dragons': 'Super Dragons', 'family:root riders': 'Root Riders', 'family:dragon riders': 'Dragon Riders', 'family:meteor golems': 'Meteor Golems', 'family:rocket balloons': 'Rocket Balloons', 'family:lalo': 'Lalo' };
+  return names[key] || raw;
+}
+const armyDailyHistory = new WeakMap(), armyLineColor = (i) => `hsl(${Math.round((i * 137.508) % 360)} 66% 46%)`;
+function armyRateGraphHTML(S, count = state.armyGraphCount) {
+  const popular = allSeasonArmyTotals(S), options = [5, 10, 20, 30].map((n) => `<option value="${n}"${count === n ? ' selected' : ''}>Top ${Math.min(n, popular.length)} armies</option>`).join('');
+  return `<div class="army-rate-graph"><div class="arg-head"><div><h3>Daily 3★ rate by army</h3><p class="sub">Each line shows that army family’s triple rate for each Legend Day, across the whole season. Openers are combined; each point includes the attack count.</p></div><label>Compare <select id="army-graph-count" aria-label="Number of popular armies to graph">${options}</select></label></div>
+    <div id="army-rate-status" class="sub">Loading daily army results…</div><div id="army-rate-chart" aria-live="polite"></div></div>`;
+}
+function armyRateChartHTML(S) {
+  const history = armyDailyHistory.get(S)?.data;
+  if (!history) return '';
+  const popular = allSeasonArmyTotals(S).slice(0, state.armyGraphCount), dates = history.dates, data = history.data;
+  if (!dates.length || !popular.length) return '<div class="msg">No daily army results are available for this season.</div>';
+  const W = 900, H = 330, L = 46, R = 16, T = 16, B = 42, x = (i) => L + (dates.length < 2 ? (W - L - R) / 2 : i * (W - L - R) / (dates.length - 1)), y = (v) => T + (H - T - B) * (1 - v / 100);
+  const grid = [0, 25, 50, 75, 100].map((v) => `<g><line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" opacity=".15"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" fill="currentColor" opacity=".7" font-size="11">${v}%</text></g>`).join('');
+  const ticks = dates.map((d, i) => (i % 7 === 0 || i === dates.length - 1) ? `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" fill="currentColor" opacity=".7" font-size="11">${monthDay(d)}</text>` : '').join('');
+  const series = popular.map((g, si) => {
+    const name = armyFamilyLabel(g.code), color = armyLineColor(si), vals = dates.map((d) => data[d]?.[groupKey(g.code)] || null);
+    let path = '', active = false;
+    vals.forEach((v, i) => { if (!v || !v.n) { active = false; return; } path += `${active ? ' L' : ' M'}${x(i).toFixed(1)},${y(rate(v.s3, v.n)).toFixed(1)}`; active = true; });
+    const pts = vals.map((v, i) => v && v.n ? `<circle cx="${x(i)}" cy="${y(rate(v.s3, v.n))}" r="4" fill="${color}"><title>${monthDay(dates[i])} · ${name} · ${fmtN(rate(v.s3, v.n), 1)}% 3★ (${fmtN(v.s3)} of ${fmtN(v.n)} attacks)</title></circle>` : '').join('');
+    return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${pts}`;
+  }).join('');
+  const legend = popular.map((g, i) => `<span class="arg-legend-item"><i style="background:${armyLineColor(i)}"></i><span class="arg-icons">${armyIcons(g.code, 3)}</span><b>${esc(armyFamilyLabel(g.code))}</b></span>`).join('');
+  return `<div class="arg-line-wrap"><svg class="arg-line-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily triple rate for the top ${popular.length} army families across the season">${grid}${ticks}${series}</svg></div><div class="arg-legend">${legend}</div>`;
+}
+function renderArmyRateGraph(S) {
+  const host = document.getElementById('army-rate-chart'); if (host && state.S === S) host.innerHTML = armyRateChartHTML(S);
+}
+async function loadArmySeasonHistory(S) {
+  if (armyDailyHistory.has(S)) return armyDailyHistory.get(S).promise;
+  const record = { data: null, promise: null }; armyDailyHistory.set(S, record);
+  const status = () => state.S === S ? document.getElementById('army-rate-status') : null;
+  record.promise = (async () => {
+    const dates = (S.agg.dayStats || []).map((d) => String(d.date).slice(0, 10)).sort();
+    const start = String(S.agg.start || '').slice(0, 10), end = String(S.agg.end || '').slice(0, 10);
+    let archives = [];
+    try { archives = (await getIndex()).archives || []; } catch (e) { throw new Error(`Could not load the season’s daily archive list: ${e.message}`); }
+    const dayKeys = archives.map((a) => a.date).filter((d) => d > start && d <= end).sort();
+    if (!dayKeys.length) throw new Error('No saved daily battle archives were found for this season.');
+    const data = {}, keys = [...dayKeys]; let next = 0, done = 0;
+    const worker = async () => { while (next < keys.length) {
+      const date = keys[next++], daily = new Map();
+      const raw = await getGz(`battlelogs/${date}.json.gz`);
+      for (const player of Object.values(raw.players || {})) for (const hit of player.attacks || []) {
+        const code = hit.armyShareCode; if (!code) continue;
+        const family = infoOf(code).group; let a = daily.get(family); if (!a) daily.set(family, (a = { n: 0, s3: 0 }));
+        a.n++; if (Number(hit.stars) === 3) a.s3++;
+      }
+      data[date] = Object.fromEntries(daily); done++;
+      const el = status(); if (el) el.textContent = `Computing daily army rates… ${done}/${keys.length} days`;
+    } };
+    await Promise.all([worker(), worker(), worker()]);
+    record.data = { dates: dayKeys, data };
+  })().then(() => {
+    const el = status(); if (el) el.textContent = `${record.data.dates.length} saved Legend Days · hover a point for its rate and attack count.`;
+    renderArmyRateGraph(S);
+  }).catch((e) => { armyDailyHistory.delete(S); const el = status(); if (el) el.textContent = `Couldn’t load daily army history: ${e.message}`; });
+  return record.promise;
+}
 const statsLine = (g) => `<span>★ ${avgOf(g.st, g.uses, 2)}</span><span>3★ ${pctOf(g.s3, g.uses)}</span><span class="pos">+${avgOf(g.t, g.uses)}</span><span>${g.uses ? dur(Math.round(g.dur / g.uses)) : '–'}</span>`;
 const repOf = (g) => [...g.vars.values()].sort((a, b) => b.players - a.players || b.uses - a.uses)[0];
 function armiesHTML(S, sel, sort) {
@@ -737,8 +827,9 @@ function armiesHTML(S, sel, sort) {
     <div class="controls">${bucketTabs(sel)}<div class="seg" id="sseg" role="group" aria-label="Sort armies">${Object.entries(SORTS).map(([k, v]) =>
       `<button data-s="${k}" aria-pressed="${k === sort}">${v}</button>`).join('')}</div></div>
     <p class="sub">${fmtN(t.withCode)} ${bucketName(sel)} players, one preferred army family each. Similar troop recipes are grouped by strategic core; counts, support troops, siege, spells, heroes, pets and equipment variations stay together.</p>
+    ${armyRateGraphHTML(S)}
     <div class="xp"><div class="acards">${cards || '<div class="msg">Not enough armies in this group yet.</div>'}</div>${expandBtn(list.length, 'more armies', ARMY_SHOW)}</div>
-    ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, t.attCode)}${openerHTML(t, t.attCode)}</section>${strategyTopHTML(t, 12)}`;
+    ${metaHTML(t)}${compHTML(t)}${siegeHTML(t)}${heroHTML(t, t.attCode)}${openerHTML(t, t.attCode)}</section>${strategyTopHTML(t, 12)}${squadHTML(t)}`;
 }
 function siegeHTML(t) {
   const base = t.attCode, ns = t.noSiege, minN = Math.max(10, Math.round(base * 0.01));
@@ -822,8 +913,25 @@ function compHTML(t) {
   };
   const byId = (...tbls) => (id) => { for (const tb of tbls) if (tb[id]) return tb[id]; return [`#${id}`, '']; };
   return `<h4 class="mh">How each one performs <small>(3★ rate of attacks that used it, at least ${fmtN(minN)} attacks; minor troops are left out)</small></h4><div class="meta5">
-    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop', (id) => !isSquadId(id))}${col('Squads', 't', byId(ARMY_IDS.troop), 'troop', isSquadId)}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
+    ${col('Troops & siege', 't', byId(ARMY_IDS.troop, ARMY_IDS.siege), 'troop', (id) => !isSquadId(id))}${col('Spells', 's', byId(ARMY_IDS.spell), 'spell')}
     ${col('Pets', 'p', (n) => [n, iconOf.get(n) || ''], 'pet')}${col('Hero equipment', 'e', (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
+}
+
+function squadHTML(t) {
+  const source = t.squads || new Map([...(t.comp || new Map())].flatMap(([key, v]) => {
+    const id = key[0] === 't' ? +key.slice(1) : NaN;
+    return isSquadId(id) ? [[id, { ...v, armies: new Map() }]] : [];
+  }));
+  const squads = [...source].sort((a, b) => b[1].n - a[1].n);
+  if (!squads.length) return `<div id="ch-squads"><h2 class="sh">Squad stats</h2><section class="panel"><div class="msg">No squad attacks recorded.</div></section></div>`;
+  const cards = squads.map(([id, q]) => {
+    const [name, icon] = ARMY_IDS.troop[id] || [`#${id}`, ''];
+    const arms = [...q.armies].sort((a, b) => b[1].n - a[1].n), minN = Math.max(5, Math.round(q.n * .01));
+    const top = new Set(arms.filter(([, a]) => a.n >= minN).sort((a, b) => rate(b[1].s3, b[1].n) - rate(a[1].s3, a[1].n) || b[1].n - a[1].n).slice(0, 3).map(([label]) => label));
+    const rows = arms.map(([label, a], i) => `<div class="srow${i >= 3 ? ' more' : ''}"><div class="sr1"><span class="sn">${esc(label)}${top.has(label) ? ' <b class="pos">Top 3★</b>' : ''}</span><span>${fmtN(a.n)} atk · ${pctOf(a.n, q.n)}</span><b>${pctOf(a.s3, a.n)}</b></div><div class="sr2"><div class="sbar"><i style="width:${rate(a.s3, a.n).toFixed(1)}%"></i></div><em>${avgOf(a.st, a.n, 2)} ★</em></div><div class="icons">${armyIcons(topCode(a.codes))}</div></div>`).join('');
+    return `<article class="scard xp"><div class="sch"><span>${ckTile('troop', name, icon)}</span><div><b>${esc(name)}</b><small>${fmtN(q.n)} attacks · ${pctOf(q.n, t.attCode)} of coded attacks · ${pctOf(q.s3, q.n)} 3★ · ${avgOf(q.st, q.n, 2)} ★</small></div></div><div class="lb">${rows}</div>${expandBtn(arms.length, 'more armies', 3)}</article>`;
+  }).join('');
+  return `<div id="ch-squads"><h2 class="sh">Squad stats</h2><section class="panel"><p class="sub">Squad usage and results across every coded attack. Army strategies show how often each squad appeared; top 3★ strategies require at least 5 attacks or 1% of that squad’s usage.${t.squads ? '' : ' Refresh live to compute the army breakdown for this saved snapshot.'}</p><div class="sgrid2">${cards}</div></section></div>`;
 }
 
 // ---------- v2 layout: chapters + sticky nav, top performers per strategy ----------
@@ -899,7 +1007,7 @@ const STYLES = `.hgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax
 .shield-note{margin:6px 0 0;padding:10px 12px;border-left:3px solid var(--ck-accent);border-radius:0 10px 10px 0;background:rgba(139,108,246,.1);font-size:.92rem}
 #ck-top{position:fixed;right:16px;bottom:16px;z-index:40;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;text-decoration:none;color:#fff;font-size:1.2rem;background:linear-gradient(135deg,var(--ck-accent),#c76cf6);box-shadow:0 8px 22px -6px rgba(0,0,0,.5);opacity:0;pointer-events:none;transform:translateY(8px);transition:.2s}#ck-top.show{opacity:1;pointer-events:auto;transform:none}
 @media (max-width:560px){.fn{grid-template-columns:1fr auto}.fn div{grid-column:1/-1;order:3}.chead h2{font-size:1.3rem}}
-`;
+.army-rate-graph{margin:14px 0 20px;padding:14px;border:1px solid rgba(128,128,128,.25);border-radius:12px;background:rgba(128,128,128,.035)}.arg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.arg-head h3{margin:0 0 3px}.arg-head .sub{margin:0}.arg-head label{display:flex;align-items:center;gap:6px;white-space:nowrap}.arg-axis,.arg-row{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(3,minmax(0,1fr)) minmax(62px,.5fr);align-items:center;gap:8px}.arg-axis{padding:0 8px 5px;color:var(--muted,#8a8fa3);font-size:11px}.arg-axis span:nth-child(3),.arg-axis span:nth-child(4){text-align:center}.arg-axis span:last-child{text-align:right}.arg-row{position:relative;min-height:34px;padding:4px 8px;border-top:1px solid rgba(128,128,128,.12);margin-bottom:8px}.arg-rank{position:absolute;left:8px;color:var(--muted,#8a8fa3);font-size:11px}.arg-label{grid-column:1;grid-row:1;display:flex;align-items:center;gap:5px;min-width:0;padding-left:20px}.arg-icons{display:flex;gap:2px;flex:none}.arg-icons .ic,.arg-icons .ic img{width:20px!important;height:20px!important;border-radius:4px}.arg-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.arg-track{grid-column:2/5;grid-row:1;height:9px;border-radius:5px;background:linear-gradient(90deg,transparent 49.5%,rgba(128,128,128,.3) 49.5%,rgba(128,128,128,.3) 50%,transparent 50%),rgba(128,128,128,.12);overflow:hidden}.arg-track i{display:block;height:100%;border-radius:5px;background:#1a8f4c;opacity:.78}.arg-row>b{grid-column:5;grid-row:1;text-align:right;font-size:12px}.arg-row>small{grid-column:5;grid-row:2;align-self:start;text-align:right;color:var(--muted,#8a8fa3);font-size:10px}@media(max-width:560px){.army-rate-graph{padding:10px}.arg-axis,.arg-row{grid-template-columns:minmax(90px,1fr) repeat(3,minmax(0,.6fr)) minmax(55px,.5fr);gap:4px}.arg-head{flex-wrap:wrap}.arg-head label{margin-left:auto}}.arg-line-wrap{overflow-x:auto;margin-top:10px}.arg-line-chart{display:block;width:100%;min-width:680px;height:auto;color:var(--muted,#8a8fa3)}.arg-line-chart circle{cursor:help;stroke:var(--panel,#fff);stroke-width:1.5}.arg-legend{display:flex;flex-wrap:wrap;gap:9px 14px;margin-top:12px}.arg-legend-item{display:flex;align-items:center;gap:5px;min-width:0;font-size:12px}.arg-legend-item>i{width:10px;height:10px;border-radius:50%;flex:none}.arg-legend-item b{font-weight:600}.arg-legend-item .arg-icons{gap:2px}.arg-line-wrap::-webkit-scrollbar{height:6px}.arg-line-wrap::-webkit-scrollbar-thumb{background:rgba(128,128,128,.35);border-radius:3px}`;
 function injectStyles() { if (document.getElementById('stats-extra-css')) return; const st = document.createElement('style'); st.id = 'stats-extra-css'; st.textContent = STYLES; document.head.append(st); }
 
 function metaHTML(t) {
@@ -913,10 +1021,8 @@ function metaHTML(t) {
   };
   const idn = (tbl) => (id) => tbl[id] || [`#${id}`, ''];
   const troops = new Map([...t.troop].filter(([id]) => !isSquadId(id)));
-  const squads = new Map([...t.troop].filter(([id]) => isSquadId(id)));
   return `<h4 class="mh">What they bring <small>(share of players whose army includes it)</small></h4><div class="meta5">
     ${col('Troops & siege', troops, (id) => ARMY_IDS.troop[id] || ARMY_IDS.siege[id] || [`#${id}`, ''], 'troop')}
-    ${col('Squads', squads, idn(ARMY_IDS.troop), 'troop')}
     ${col('Spells', t.spell, idn(ARMY_IDS.spell), 'spell')}
     ${col('Pets', t.pet, (n) => [n, iconOf.get(n) || ''], 'pet')}
     ${col('Hero equipment', t.equip, (n) => [n, iconOf.get(n) || ''], 'equip')}</div>`;
@@ -1274,7 +1380,7 @@ function bindPlayerUI() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'psi') go(); });
   window.addEventListener('popstate', () => draw());
 }
-const state = { S: null, bucket: ALL, sort: 'used', list: [], seasonRecap: null, lbLimit: 100, boardOrder: 'metric', rankScope: 0, shieldLoading: new Set() };
+const state = { S: null, bucket: ALL, sort: 'used', list: [], armyGraphCount: 10, seasonRecap: null, lbLimit: 100, boardOrder: 'metric', rankScope: 0, shieldLoading: new Set() };
 let seasonRecapToken = 0;
 async function renderSeasonRecapCard(S) {
   const cv = document.getElementById('srcv'); if (!cv) return;
@@ -1297,13 +1403,15 @@ function draw() {
       ['trends', 'Day by day', 'How attacks, results and armies moved across the season.', trendHTML(S) + chartsHTML(S)],
       ['players', 'Placement &amp; leaderboards', 'Season records and player leaderboards.', placementHTML(S) + leaderboardsHTML(S)],
       ['armies', 'Armies &amp; strategies', 'What the best players bring, and who performs best with each strategy.', dukeHTML(S) + `<div id="armies">${armiesHTML(S, state.bucket, state.sort)}</div>`],
-      ['shields', 'Shield watch', 'Day-by-day shield activity across the season.', shieldSeasonHTML(S)]], [['ch-strats', 'Top performers']]);
+      ['shields', 'Shield watch', 'Day-by-day shield activity across the season.', shieldSeasonHTML(S)]], [['ch-strats', 'Top performers'], ['ch-squads', 'Squads']]);
+  if (document.getElementById('army-rate-chart')) void loadArmySeasonHistory(S);
   if (S.rows.length) renderSeasonRecapCard(S);
   if (S.agg.dayStats && S.agg.dayStats.length) void loadShieldHistory(S);
 }
 function drawArmies() {
   const holder = document.getElementById('armies'); if (!holder) return draw();
   holder.innerHTML = armiesHTML(state.S, state.bucket, state.sort);
+  renderArmyRateGraph(state.S);
 }
 // Season branches are named archive-s<start date>; the schedule is ANCHOR + n * 28 days (same maths as scanner/archive.mjs).
 const seasonKeys = () => {
@@ -1394,6 +1502,11 @@ async function initSeason() {
     }
   });
   document.addEventListener('change', (e) => {
+    if (e.target.id === 'army-graph-count') {
+      state.armyGraphCount = Number(e.target.value);
+      if (state.S) renderArmyRateGraph(state.S);
+      return;
+    }
     if (e.target.id === 'rank-scope') {
       state.rankScope = Number(e.target.value);
       const holder = document.getElementById('leaderboards'); if (holder) holder.outerHTML = leaderboardsHTML(state.S);
