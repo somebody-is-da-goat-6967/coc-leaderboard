@@ -1,7 +1,7 @@
 name: precompute-season-stats
 on:
   workflow_run:
-    workflows: ["crawl-legend-board", "sync-site-sources"]
+    workflows: ["crawl-legend-board"]
     types: [completed]
   schedule:
     - cron: "42 */6 * * *"
@@ -27,14 +27,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Fetch live website source and sync local copies
-        run: node scripts/sync-site-sources.mjs . site-source
       - name: Restore computed results
         run: |
           URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git clone --depth 1 --branch computed-season "$URL" out || { mkdir out; git -C out init -q -b computed-season; git -C out remote add origin "$URL"; }
       - name: Compute season stats
-        run: node site-compute/precompute-site-stats.mjs --mode season --data data --site site-source --out out
+        run: node site-compute/precompute-site-stats.mjs --mode season --data data --site site-compute --out out
       - name: Publish computed results
         working-directory: out
         run: |

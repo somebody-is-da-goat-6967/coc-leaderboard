@@ -22,7 +22,6 @@ for (const [file, text] of downloaded) fs.writeFileSync(path.join(source, file),
 const copies = {
   '.': ['armyids.js', 'army.js', 'legend.js', 'stats.js'],
   scanner: ['armyids.js', 'army.js', 'stats.js'],
-  'site-compute': files,
 };
 for (const [dir, names] of Object.entries(copies)) {
   const outDir = path.join(target, dir);

@@ -735,85 +735,38 @@ function groupList(t, sort) {
   return [...t.groups.values()].filter((g) => g.players >= minP && g.uses >= (sort === 'used' ? 1 : 8))
     .sort((a, b) => val(b) - val(a) || b.players - a.players || b.uses - a.uses).slice(0, ARMY_MAX);
 }
-const seasonArmyTotals = new WeakMap();
-function allSeasonArmyTotals(S) {
-  if (seasonArmyTotals.has(S)) return seasonArmyTotals.get(S);
-  const totals = new Map(), agg = S.agg || {};
-  for (const p of Object.values(agg.players || {})) for (const [ci, v] of Object.entries(p.arm || {})) {
-    const code = agg.codes?.[+ci]; if (!code || !Array.isArray(v)) continue;
-    const key = groupKey(code); let g = totals.get(key);
-    if (!g) totals.set(key, (g = { uses: 0, s3: 0, variants: new Map() }));
-    g.uses += Number(v[0]) || 0; g.s3 += Number(v[2]) || 0;
-    let variant = g.variants.get(code); if (!variant) g.variants.set(code, (variant = { uses: 0 }));
-    variant.uses += Number(v[0]) || 0;
-  }
-  const list = [...totals.values()].sort((a, b) => b.uses - a.uses);
-  for (const g of list) g.code = [...g.variants].sort((a, b) => b[1].uses - a[1].uses)[0]?.[0] || '';
-  seasonArmyTotals.set(S, list);
-  return list;
-}
-function armyFamilyLabel(code) {
-  const info = infoOf(code), raw = info.cls.core || info.cls.strategy || 'Army family', key = info.group;
-  const names = { 'family:throwers': 'Throwers', 'family:super bowlers': 'Super Bowlers', 'family:super witches': 'Super Witches', 'family:super yetis': 'Super Yetis', 'family:super dragons': 'Super Dragons', 'family:root riders': 'Root Riders', 'family:dragon riders': 'Dragon Riders', 'family:meteor golems': 'Meteor Golems', 'family:rocket balloons': 'Rocket Balloons', 'family:lalo': 'Lalo' };
-  return names[key] || raw;
-}
-const armyDailyHistory = new WeakMap(), armyLineColor = (i) => `hsl(${Math.round((i * 137.508) % 360)} 66% 46%)`;
+const armyLineColor = (i) => `hsl(${Math.round((i * 137.508) % 360)} 66% 46%)`;
 function armyRateGraphHTML(S, count = state.armyGraphCount) {
-  const popular = allSeasonArmyTotals(S), options = [5, 10, 20, 30].map((n) => `<option value="${n}"${count === n ? ' selected' : ''}>Top ${Math.min(n, popular.length)} armies</option>`).join('');
+  const popular = S.armyTrend?.armies || [], options = [5, 10, 20, 30].map((n) => `<option value="${n}"${count === n ? ' selected' : ''}>Top ${Math.min(n, popular.length)} armies</option>`).join('');
   return `<div class="army-rate-graph"><div class="arg-head"><div><h3>Daily 3★ rate by army</h3><p class="sub">Each line shows that army family’s triple rate for each Legend Day, across the whole season. Openers are combined; each point includes the attack count.</p></div><label>Compare <select id="army-graph-count" aria-label="Number of popular armies to graph">${options}</select></label></div>
     <div id="army-rate-status" class="sub">Loading daily army results…</div><div id="army-rate-chart" aria-live="polite"></div></div>`;
 }
 function armyRateChartHTML(S) {
-  const history = armyDailyHistory.get(S)?.data;
-  if (!history) return '';
-  const popular = allSeasonArmyTotals(S).slice(0, state.armyGraphCount), dates = history.dates, data = history.data;
+  const trend = S.armyTrend; if (!trend) return '';
+  const popular = trend.armies.slice(0, state.armyGraphCount), dates = trend.dates;
   if (!dates.length || !popular.length) return '<div class="msg">No daily army results are available for this season.</div>';
   const W = 900, H = 330, L = 46, R = 16, T = 16, B = 42, x = (i) => L + (dates.length < 2 ? (W - L - R) / 2 : i * (W - L - R) / (dates.length - 1)), y = (v) => T + (H - T - B) * (1 - v / 100);
   const grid = [0, 25, 50, 75, 100].map((v) => `<g><line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="currentColor" opacity=".15"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" fill="currentColor" opacity=".7" font-size="11">${v}%</text></g>`).join('');
   const ticks = dates.map((d, i) => (i % 7 === 0 || i === dates.length - 1) ? `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" fill="currentColor" opacity=".7" font-size="11">${monthDay(d)}</text>` : '').join('');
   const series = popular.map((g, si) => {
-    const name = armyFamilyLabel(g.code), color = armyLineColor(si), vals = dates.map((d) => data[d]?.[groupKey(g.code)] || null);
+    const name = g.label, color = armyLineColor(si), vals = g.daily;
     let path = '', active = false;
-    vals.forEach((v, i) => { if (!v || !v.n) { active = false; return; } path += `${active ? ' L' : ' M'}${x(i).toFixed(1)},${y(rate(v.s3, v.n)).toFixed(1)}`; active = true; });
-    const pts = vals.map((v, i) => v && v.n ? `<circle cx="${x(i)}" cy="${y(rate(v.s3, v.n))}" r="4" fill="${color}"><title>${monthDay(dates[i])} · ${name} · ${fmtN(rate(v.s3, v.n), 1)}% 3★ (${fmtN(v.s3)} of ${fmtN(v.n)} attacks)</title></circle>` : '').join('');
+    vals.forEach((v, i) => { if (!v || !v.uses) { active = false; return; } path += `${active ? ' L' : ' M'}${x(i).toFixed(1)},${y(v.tripleRate).toFixed(1)}`; active = true; });
+    const pts = vals.map((v, i) => v && v.uses ? `<circle cx="${x(i)}" cy="${y(v.tripleRate)}" r="4" fill="${color}"><title>${monthDay(dates[i])} · ${name} · ${fmtN(v.tripleRate, 1)}% 3★ (${fmtN(v.triples)} of ${fmtN(v.uses)} attacks)</title></circle>` : '').join('');
     return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${pts}`;
   }).join('');
-  const legend = popular.map((g, i) => `<span class="arg-legend-item"><i style="background:${armyLineColor(i)}"></i><span class="arg-icons">${armyIcons(g.code, 3)}</span><b>${esc(armyFamilyLabel(g.code))}</b></span>`).join('');
+  const legend = popular.map((g, i) => `<span class="arg-legend-item"><i style="background:${armyLineColor(i)}"></i><span class="arg-icons">${armyIcons(g.code, 3)}</span><b>${esc(g.label)}</b><small>${fmtN(g.usageRate, 1)}% usage</small></span>`).join('');
   return `<div class="arg-line-wrap"><svg class="arg-line-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily triple rate for the top ${popular.length} army families across the season">${grid}${ticks}${series}</svg></div><div class="arg-legend">${legend}</div>`;
 }
 function renderArmyRateGraph(S) {
   const host = document.getElementById('army-rate-chart'); if (host && state.S === S) host.innerHTML = armyRateChartHTML(S);
 }
-async function loadArmySeasonHistory(S) {
-  if (armyDailyHistory.has(S)) return armyDailyHistory.get(S).promise;
-  const record = { data: null, promise: null }; armyDailyHistory.set(S, record);
-  const status = () => state.S === S ? document.getElementById('army-rate-status') : null;
-  record.promise = (async () => {
-    const dates = (S.agg.dayStats || []).map((d) => String(d.date).slice(0, 10)).sort();
-    const start = String(S.agg.start || '').slice(0, 10), end = String(S.agg.end || '').slice(0, 10);
-    let archives = [];
-    try { archives = (await getIndex()).archives || []; } catch (e) { throw new Error(`Could not load the season’s daily archive list: ${e.message}`); }
-    const dayKeys = archives.map((a) => a.date).filter((d) => d > start && d <= end).sort();
-    if (!dayKeys.length) throw new Error('No saved daily battle archives were found for this season.');
-    const data = {}, keys = [...dayKeys]; let next = 0, done = 0;
-    const worker = async () => { while (next < keys.length) {
-      const date = keys[next++], daily = new Map();
-      const raw = await getGz(`battlelogs/${date}.json.gz`);
-      for (const player of Object.values(raw.players || {})) for (const hit of player.attacks || []) {
-        const code = hit.armyShareCode; if (!code) continue;
-        const family = infoOf(code).group; let a = daily.get(family); if (!a) daily.set(family, (a = { n: 0, s3: 0 }));
-        a.n++; if (Number(hit.stars) === 3) a.s3++;
-      }
-      data[date] = Object.fromEntries(daily); done++;
-      const el = status(); if (el) el.textContent = `Computing daily army rates… ${done}/${keys.length} days`;
-    } };
-    await Promise.all([worker(), worker(), worker()]);
-    record.data = { dates: dayKeys, data };
-  })().then(() => {
-    const el = status(); if (el) el.textContent = `${record.data.dates.length} saved Legend Days · hover a point for its rate and attack count.`;
-    renderArmyRateGraph(S);
-  }).catch((e) => { armyDailyHistory.delete(S); const el = status(); if (el) el.textContent = `Couldn’t load daily army history: ${e.message}`; });
-  return record.promise;
+function loadArmySeasonHistory(S) {
+  const el = state.S === S ? document.getElementById('army-rate-status') : null;
+  if (S.armyTrend) {
+    if (el) el.textContent = `${S.armyTrend.dates.length} precomputed Legend Days · hover a point for its rate and attack count.`;
+  } else if (el) el.textContent = 'Daily army rates are not in this saved season snapshot yet. They will appear after the public precompute job runs.';
+  renderArmyRateGraph(S);
 }
 const statsLine = (g) => `<span>★ ${avgOf(g.st, g.uses, 2)}</span><span>3★ ${pctOf(g.s3, g.uses)}</span><span class="pos">+${avgOf(g.t, g.uses)}</span><span>${g.uses ? dur(Math.round(g.dur / g.uses)) : '–'}</span>`;
 const repOf = (g) => [...g.vars.values()].sort((a, b) => b.players - a.players || b.uses - a.uses)[0];
