@@ -176,7 +176,7 @@ function installArmyPerformers(context) {
   };`, context);
 }
 
-function precomputeArmyTrend(dayRows) {
+function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
   const dates = dayRows.map((d) => d.date), codedAttacks = dayRows.map((d) => d.codedAttacks || 0), codedTotal = codedAttacks.reduce((a, b) => a + b, 0), armies = new Map(), openers = new Map();
   dayRows.forEach((day, di) => {
     for (const [map, values] of [[armies, day.armies || {}], [openers, day.openers || {}]]) for (const [key, v] of Object.entries(values)) {
@@ -460,7 +460,7 @@ async function season() {
       dayRows.push(await call(context, '__summarizeArmyDay(__input.date, __input.players)', { date, players: dayRaw.players || {} }));
     }
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
-    S.armyTrend = precomputeArmyTrend(dayRows);
+    S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
     const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 10, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
