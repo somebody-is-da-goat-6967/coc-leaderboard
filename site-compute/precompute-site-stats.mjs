@@ -220,7 +220,7 @@ function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
   });
   const pct = (n, d) => d ? 100 * n / d : 0;
   const familyLabel = (key) => {
-    const family = String(key).replace(/^family:/, ''), known = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons', lalo: 'Lalo' };
+    const family = String(key).replace(/^family:/, ''), known = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons', lalo: 'LaLo' };
     return known[family] || family.replace(/\b\w/g, (c) => c.toUpperCase());
   };
   const armyRows = [...armies.values()].map((x) => {
