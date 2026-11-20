@@ -111,27 +111,25 @@ function installArmyDaySummarizer(context) {
 
 // Army strategy of the highest avg-offense players + best performers per strategy (feeds /legendstats).
 // Strategy names follow the community naming: 15+ Balloons = LaLo, LaLo with a few Dragons = Drag LaLo.
-// Everything else keeps the site's own army family (Super Bowlers, Root Riders, Dragon Riders, ...).
+// Everything else keeps the site's own strategy name = opener + army, like the website's "Top performers by strategy" (e.g. 'Zap Backpack + Super Bowler Smash').
 const LALO_MIN_BALLOONS = 15, DRAG_LALO_MIN_DRAGONS = 2;
 function installArmyPerformers(context) {
   vm.runInContext(`globalThis.__armyPerformers = function(agg, cfg) {
     const { minAttacks, keepPlayers, keepStrategies, keepPerformers, performerMinAttacks, laloBalloons, dragLaloDragons } = cfg;
-    const KNOWN = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons',
-      'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons' };
     const labels = new Map();
     const labelOf = (code) => {
       let hit = labels.get(code); if (hit) return hit;
-      const inf = infoOf(code), counts = new Map();
+      const inf = infoOf(code), cls = inf.cls || {}, counts = new Map();
       for (const [id, n] of armyCounts(secOf(code, /u([\\dx-]*)/))) {
         if (isSiegeId(id)) continue;
         const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
       }
       const balloons = counts.get('Balloon') || 0, dragons = counts.get('Dragon') || 0;
-      const family = String(inf.group || '').replace(/^family:/, '');
-      let label;
-      if (balloons >= laloBalloons) label = dragons >= dragLaloDragons ? 'Drag LaLo' : 'LaLo';
-      else if (family === 'lalo') label = 'Lava Hound Mix';
-      else label = KNOWN[family] || family.replace(/\\b\\w/g, (c) => c.toUpperCase());
+      let label = cls.strategy || 'Unknown Build';
+      if (balloons >= laloBalloons) {
+        const core = dragons >= dragLaloDragons ? 'Drag LaLo' : 'LaLo', opener = cls.openerRaw || 'Spam Opener';
+        label = opener === 'Spam' ? 'Totem Spam + ' + core : opener === 'Spam Opener' ? core : cls.opener + ' + ' + core;
+      }
       if (labels.size > 400000) labels.clear();
       labels.set(code, label); return label;
     };
@@ -461,7 +459,7 @@ async function season() {
     }
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
-    const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 10, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
+    const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
     writeJson(`leaderboards/${key}.json`, {
