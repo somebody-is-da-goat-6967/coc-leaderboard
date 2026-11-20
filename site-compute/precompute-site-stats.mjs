@@ -150,7 +150,7 @@ function installArmyPerformers(context) {
         g.n += v[0]; g.st += v[1]; g.s3 += v[2]; g.t += v[3];
         if (g.codes.has(code) || g.codes.size < 300) g.codes.set(code, (g.codes.get(code) || 0) + v[0]);
       }
-      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: p.r || 0, n: m.n, st: m.st, s3: m.s3, t: m.t });
+      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: p.r || 0, n: m.n, st: m.st, s3: m.s3, t: m.t, code: m.code });
       if (p.na >= minAttacks && p.dy > 0) rows.push({ tag, p, mine: [...mine.values()].sort((a, b) => b.n - a.n || b.st - a.st), coded });
     }
     rows.sort((a, b) => b.p.a / b.p.dy - a.p.a / a.p.dy || (a.p.r || 1e9) - (b.p.r || 1e9));
@@ -169,7 +169,7 @@ function installArmyPerformers(context) {
       label: g.label, players: g.players.size, attacks: g.n, triples: g.s3, tripleRate: +(100 * g.s3 / g.n).toFixed(1), avgStars: +(g.st / g.n).toFixed(2), code: topCode(g.codes),
       performers: [...g.players.values()].filter((x) => x.n >= performerMinAttacks)
         .sort((a, b) => wilson(b.s3, b.n) - wilson(a.s3, a.n) || b.st / b.n - a.st / a.n || b.n - a.n).slice(0, keepPerformers)
-        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1) })),
+        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, code: x.code, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1) })),
     }));
     const codedAttacks = [...strategies.values()].reduce((n, g) => n + g.n, 0);
     return { minAttacks, performerMinAttacks, laloBalloons, dragLaloDragons, codedAttacks, avgOffense, mix, strategies: cards };
