@@ -257,7 +257,7 @@ async function daily() {
     const f = path.join(dataDir, 'eod', `${date}.json.gz`);
     if (exists(f)) ranksByDate.set(date, eodRanks(readGz(f)));
   }
-  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'stats.js', 'strategy.js']);
+  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'stats.js']);
   const run = async (file, key) => {
     if (!exists(file)) return;
     const raw = readGz(file), start = Date.parse(raw.dayStart), end = Date.parse(raw.dayEnd), wanted = new Date(end).toISOString().slice(0, 10);
@@ -471,7 +471,7 @@ async function wintraders() {
 }
 
 async function season() {
-  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js', 'strategy.js']);
+  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
   installArmyDaySummarizer(context);
   installArmyPerformers(context);
   const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
