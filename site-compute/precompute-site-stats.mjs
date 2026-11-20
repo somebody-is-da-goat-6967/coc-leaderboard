@@ -133,6 +133,16 @@ function installArmyPerformers(context) {
       if (labels.size > 400000) labels.clear();
       labels.set(code, label); return label;
     };
+    // Minion Prince's Portal Pendant (hero 6, equipment id 61 in the share codes; the id is not in armyids.js yet).
+    const PORTAL_PENDANT_ID = 61;
+    const hasPortal = (code) => {
+      const m = /^h([\\dmpe_-]+)/.exec(code); if (!m) return false;
+      for (const entry of m[1].split('-')) {
+        const e = /^6(?:m\\d+)?(?:p\\d+)?(?:e(\\d+)(?:_(\\d+))?)?$/.exec(entry);
+        if (e && (+e[1] === PORTAL_PENDANT_ID || +e[2] === PORTAL_PENDANT_ID)) return true;
+      }
+      return false;
+    };
     const SKIP = new Set(['Farming Army', 'Unknown Build', 'Unknown']);
     const strategies = new Map(), rows = [];
     for (const [tag, p] of Object.entries(agg.players || {})) {
@@ -141,14 +151,15 @@ function installArmyPerformers(context) {
       for (const [ci, v] of Object.entries(p.arm || {})) {
         const code = agg.codes[+ci]; if (!code) continue;
         const label = labelOf(code); coded += v[0];
-        let m = mine.get(label); if (!m) mine.set(label, (m = { label, n: 0, st: 0, s3: 0, t: 0, code: '', codeN: -1 }));
+        let m = mine.get(label); if (!m) mine.set(label, (m = { label, n: 0, st: 0, s3: 0, t: 0, code: '', codeN: -1, portal: false }));
         m.n += v[0]; m.st += v[1]; m.s3 += v[2]; m.t += v[3];
         if (v[0] > m.codeN) { m.codeN = v[0]; m.code = code; }
+        if (!m.portal && hasPortal(code)) m.portal = true;
         let g = strategies.get(label); if (!g) strategies.set(label, (g = { label, n: 0, st: 0, s3: 0, t: 0, players: new Map(), codes: new Map() }));
         g.n += v[0]; g.st += v[1]; g.s3 += v[2]; g.t += v[3];
         if (g.codes.has(code) || g.codes.size < 300) g.codes.set(code, (g.codes.get(code) || 0) + v[0]);
       }
-      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: p.r || 0, n: m.n, st: m.st, s3: m.s3, t: m.t, code: m.code });
+      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: p.r || 0, n: m.n, st: m.st, s3: m.s3, t: m.t, code: m.code, portal: m.portal });
       if (p.na >= minAttacks && p.dy > 0) rows.push({ tag, p, mine: [...mine.values()].sort((a, b) => b.n - a.n || b.st - a.st), coded });
     }
     rows.sort((a, b) => b.p.a / b.p.dy - a.p.a / a.p.dy || (a.p.r || 1e9) - (b.p.r || 1e9));
@@ -156,7 +167,7 @@ function installArmyPerformers(context) {
       const top = mine[0] || null;
       return { tag, name: p.n || tag, rank: p.r || 0, perDay: +(p.a / p.dy).toFixed(2), days: p.dy, attacks: p.na, triples: p.s3,
         strategy: top ? top.label : null, strategyAttacks: top ? top.n : 0, share: top && coded ? +(top.n / coded).toFixed(3) : 0,
-        tripleRate: top && top.n ? +(100 * top.s3 / top.n).toFixed(1) : null, code: top ? top.code : '',
+        tripleRate: top && top.n ? +(100 * top.s3 / top.n).toFixed(1) : null, code: top ? top.code : '', portal: !!(top && top.portal),
         mix: mine.slice(0, 3).map((m) => ({ label: m.label, attacks: m.n })) };
     });
     const mixMap = new Map();
@@ -167,11 +178,35 @@ function installArmyPerformers(context) {
       label: g.label, players: g.players.size, attacks: g.n, triples: g.s3, tripleRate: +(100 * g.s3 / g.n).toFixed(1), avgStars: +(g.st / g.n).toFixed(2), code: topCode(g.codes),
       performers: [...g.players.values()].filter((x) => x.n >= performerMinAttacks)
         .sort((a, b) => wilson(b.s3, b.n) - wilson(a.s3, a.n) || b.st / b.n - a.st / a.n || b.n - a.n).slice(0, keepPerformers)
-        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, code: x.code, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1) })),
+        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, code: x.code, portal: !!x.portal, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1) })),
     }));
     const codedAttacks = [...strategies.values()].reduce((n, g) => n + g.n, 0);
     return { minAttacks, performerMinAttacks, laloBalloons, dragLaloDragons, codedAttacks, avgOffense, mix, strategies: cards };
   };`, context);
+}
+
+// Triple rate per Legend Day for everyone and for the top 10 / 100 / 1,000 / 5,000 / 10,000 players (feeds /legendstats "Triple rate per day").
+// A player belongs to a tier when their season rank (agg.players[tag].r) is within the top N; tiers are cumulative.
+const TRIPLE_TIERS = [10, 100, 1000, 5000, 10000];
+function summarizeTripleDay(players, rankByTag) {
+  const out = { all: [0, 0] };
+  for (const t of TRIPLE_TIERS) out[t] = [0, 0];
+  for (const [tag, p] of Object.entries(players || {})) {
+    const rank = rankByTag.get(norm(tag)) || 0;
+    for (const hit of p.attacks || []) {
+      const triple = Number(hit.stars) === 3 ? 1 : 0;
+      out.all[0]++; out.all[1] += triple;
+      if (rank > 0) for (const t of TRIPLE_TIERS) if (rank <= t) { out[t][0]++; out[t][1] += triple; }
+    }
+  }
+  return out;
+}
+function buildTripleDaily(dates, perDay) {
+  const tiers = {};
+  for (const key of ['all', ...TRIPLE_TIERS.map(String)]) {
+    tiers[key] = { attacks: perDay.map((d) => d[key][0]), triples: perDay.map((d) => d[key][1]) };
+  }
+  return { dates, tiers };
 }
 
 function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
@@ -222,7 +257,7 @@ async function daily() {
     const f = path.join(dataDir, 'eod', `${date}.json.gz`);
     if (exists(f)) ranksByDate.set(date, eodRanks(readGz(f)));
   }
-  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'stats.js']);
+  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'stats.js', 'strategy.js']);
   const run = async (file, key) => {
     if (!exists(file)) return;
     const raw = readGz(file), start = Date.parse(raw.dayStart), end = Date.parse(raw.dayEnd), wanted = new Date(end).toISOString().slice(0, 10);
@@ -436,7 +471,7 @@ async function wintraders() {
 }
 
 async function season() {
-  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
+  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js', 'strategy.js']);
   installArmyDaySummarizer(context);
   installArmyPerformers(context);
   const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
@@ -448,7 +483,8 @@ async function season() {
     const S = await call(context, 'computeSeason(__input.agg, () => {}, () => false)', { agg: raw });
     const archiveBase = `${repo}/archive-s${key}`;
     const archiveDates = (raw.days || []).map((d) => String(d).slice(0, 10)).sort();
-    const dayRows = [];
+    const rankByTag = new Map(Object.entries(raw.players || {}).map(([tag, p]) => [norm(tag), Number(p.r) || 0]));
+    const dayRows = [], tripleDays = [];
     for (const date of archiveDates) {
       const local = path.join(dataDir, `archive-s${key}`, 'days', `${date}.json.gz`);
       let dayRaw;
@@ -456,9 +492,11 @@ async function season() {
       else dayRaw = await fetchRemoteJson(`${archiveBase}/days/${date}.json.gz`, true);
       if (!dayRaw) throw new Error(`Could not load archived season battlelog ${date}.`);
       dayRows.push(await call(context, '__summarizeArmyDay(__input.date, __input.players)', { date, players: dayRaw.players || {} }));
+      tripleDays.push(summarizeTripleDay(dayRaw.players || {}, rankByTag));
     }
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
+    const tripleDaily = buildTripleDaily(dayRows.map((d) => d.date), tripleDays);
     const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
@@ -469,6 +507,7 @@ async function season() {
       leaderboards: seasonLeaderboards(S),
       armyTrend: S.armyTrend,
       armyPerformers,
+      tripleDaily,
     });
 
   }
