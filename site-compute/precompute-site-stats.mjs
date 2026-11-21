@@ -3,6 +3,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import zlib from 'node:zlib';
+import os from 'node:os';
+import v8 from 'node:v8';
+import { spawnSync } from 'node:child_process';
+
+// Node's default heap (about 4 GB) is too small for a full 28-day season. Re-run this script once with a bigger heap
+// (three quarters of the machine's RAM, at most 8 GB) so the workflow does not need a NODE_OPTIONS / --max-old-space-size flag.
+if (!process.env.PRECOMPUTE_CHILD) {
+  const currentMb = v8.getHeapStatistics().heap_size_limit / 1048576, targetMb = Math.min(8192, Math.floor(os.totalmem() / 1048576 * 0.75));
+  if (targetMb > currentMb * 1.25) {
+    console.log(`[precompute] heap limit ${Math.round(currentMb)} MB -> restarting with ${targetMb} MB`);
+    const child = spawnSync(process.execPath, [`--max-old-space-size=${targetMb}`, ...process.argv.slice(1)], { stdio: 'inherit', env: { ...process.env, PRECOMPUTE_CHILD: '1' } });
+    process.exit(child.status ?? 1);
+  }
+}
+const heapMb = () => Math.round(process.memoryUsage().heapUsed / 1048576);
 
 const args = Object.fromEntries(process.argv.slice(2).map((x, i, a) => x.startsWith('--') ? [x.slice(2), a[i + 1]] : null).filter(Boolean));
 const mode = args.mode, dataDir = path.resolve(args.data || 'data'), rankedDir = path.resolve(args.ranked || dataDir), siteDir = path.resolve(args.site || '.'), outDir = path.resolve(args.out || 'out');
@@ -105,6 +120,11 @@ function installArmyDaySummarizer(context) {
       add(armies, info.group, code, triple);
       add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', code, triple);
       const t = byCode.get(code) || (byCode.set(code, [0, 0]), byCode.get(code)); t[0]++; if (triple) t[1]++;
+    }
+    // Keep only the most used share codes per army family / opener and day: the season only needs a representative code, and storing every code of every day was the biggest thing held in memory.
+    for (const map of [armies, openers]) for (const x of Object.values(map)) {
+      const entries = Object.entries(x.variants);
+      if (entries.length > 25) x.variants = Object.fromEntries(entries.sort((a, b) => b[1] - a[1]).slice(0, 25));
     }
     // Equipment is resolved once per distinct army code of the day (not once per attack), then weighted by how often the code was used.
     for (const [code, t] of byCode) {
@@ -670,6 +690,7 @@ async function season() {
       if (!dayRaw) throw new Error(`Could not load archived season battlelog ${date}.`);
       dayRows.push(await call(context, '__summarizeArmyDay(__input.date, __input.players)', { date, players: dayRaw.players || {} }));
       tripleDays.push(summarizeTripleDay(dayRaw.players || {}, rankByTag));
+      dayRaw = null;
     }
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
@@ -679,6 +700,7 @@ async function season() {
     const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
     const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS,
       eligible: (S.rows || []).map((r) => [r.tag, r.a, r.dy, r.na, r.s3, r.rank]) } });
+    console.log(`[precompute:season] ${key}: heap ${heapMb()} MB after the daily summaries`);
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
     writeJson(`leaderboards/${key}.json`, {
