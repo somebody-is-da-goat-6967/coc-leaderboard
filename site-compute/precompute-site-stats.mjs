@@ -93,7 +93,7 @@ function sameSeason(dateA, dateB, anchor, seasonDays) {
 
 function installArmyDaySummarizer(context) {
   vm.runInContext(`globalThis.__summarizeArmyDay = function(date, players) {
-    const armies = {}, openers = {}, equipment = {}; let codedAttacks = 0;
+    const armies = {}, openers = {}, equipment = {}, byCode = new Map(); let codedAttacks = 0;
     const add = (map, key, code, triple) => {
       const x = map[key] || (map[key] = { uses: 0, triples: 0, variants: {} });
       x.uses++; if (triple) x.triples++;
@@ -104,13 +104,17 @@ function installArmyDaySummarizer(context) {
       const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++;
       add(armies, info.group, code, triple);
       add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', code, triple);
-      const seenEquip = new Set();
-      for (const hero of info.heroes || []) for (const gear of hero.equip || []) {
+      const t = byCode.get(code) || (byCode.set(code, [0, 0]), byCode.get(code)); t[0]++; if (triple) t[1]++;
+    }
+    // Equipment is resolved once per distinct army code of the day (not once per attack), then weighted by how often the code was used.
+    for (const [code, t] of byCode) {
+      const seen = new Set();
+      for (const hero of infoOf(code).heroes || []) for (const gear of hero.equip || []) {
         const name = typeof gear === 'string' ? gear : gear && gear.name;
-        if (!name || seenEquip.has(name)) continue;
-        seenEquip.add(name);
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
         const e = equipment[name] || (equipment[name] = { uses: 0, triples: 0, hero: hero.name || '' });
-        e.uses++; if (triple) e.triples++;
+        e.uses += t[0]; e.triples += t[1];
       }
     }
     return { date: String(date).slice(0, 10), codedAttacks, armies, openers, equipment };
@@ -643,15 +647,16 @@ async function wintraders() {
 }
 
 async function season() {
-  const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
-  installArmyDaySummarizer(context);
-  installArmyPerformers(context);
   const anchor = Date.parse('2026-10-05T05:00:00Z'), span = 28 * 86400000, current = Math.floor((Date.now() - anchor) / span);
   const repo = 'https://raw.githubusercontent.com/somebody-is-da-goat-6967/coc-leaderboard';
   for (const n of [current, current - 1]) {
     const key = new Date(anchor + n * span).toISOString().slice(0, 10), url = `${repo}/archive-s${key}/season.json.gz`;
     const raw = await fetchRemoteJson(url, true);
     if (!raw) { console.log(`[precompute:season] missing season ${key}`); continue; }
+    // A fresh VM per season: the army decoder caches every share code it sees, and two seasons in one VM exhausted the heap.
+    const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
+    installArmyDaySummarizer(context);
+    installArmyPerformers(context);
     const S = await call(context, 'computeSeason(__input.agg, () => {}, () => false)', { agg: raw });
     const archiveBase = `${repo}/archive-s${key}`;
     const archiveDates = (raw.days || []).map((d) => String(d).slice(0, 10)).sort();
