@@ -35,11 +35,12 @@ jobs:
           git clone --depth 1 --branch computed-daily "$URL" out || { mkdir out; git -C out init -q -b computed-daily; git -C out remote add origin "$URL"; }
       - name: Compute daily stats
         run: node site-compute/precompute-site-stats.mjs --mode daily --data data --site site-source --out out
-      - name: Publish computed results
+      - name: Publish computed results (single commit so history never grows)
         working-directory: out
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan fresh
           git add -A
-          git commit -m "daily stats $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push origin HEAD:computed-daily
+          git commit -q -m "daily stats $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f origin fresh:computed-daily
