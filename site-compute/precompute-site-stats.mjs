@@ -229,7 +229,7 @@ function rankLadderCenters(maxRank) {
   return centers;
 }
 function computeRankLadder(agg) {
-  const rows = Object.values(agg.players || {}).filter((p) => p.r > 0 && (p.na || p.nd)).sort((a, b) => a.r - b.r);
+  const rows = Object.entries(agg.players || {}).filter(([, p]) => p.r > 0 && (p.na || p.nd)).map(([tag, p]) => ({ ...p, tag })).sort((a, b) => a.r - b.r);
   if (!rows.length) return null;
   const prefix = (pick) => { const out = [0]; for (const p of rows) out.push(out.at(-1) + (Number(pick(p)) || 0)); return out; };
   const A = prefix((p) => p.a), D = prefix((p) => p.d), NA = prefix((p) => p.na), ND = prefix((p) => p.nd), S3 = prefix((p) => p.s3);
@@ -241,7 +241,61 @@ function computeRankLadder(agg) {
     if (!n || na < 8) continue;
     points.push([center, n, na, nd, +(8 * (A[hi] - A[lo]) / na).toFixed(1), nd ? +(8 * (D[hi] - D[lo]) / nd).toFixed(1) : null, +(100 * (S3[hi] - S3[lo]) / na).toFixed(1)]);
   }
-  return points.length ? { window: RANK_WINDOW, maxRank, rankedPlayers: rows.length, fields: RANK_LADDER_FIELDS, points } : null;
+  return points.length ? { window: RANK_WINDOW, maxRank, rankedPlayers: rows.length, fields: RANK_LADDER_FIELDS, points, outliers: rankLadderOutliers(points, rows, firstAtLeast) } : null;
+}
+
+// ───── Outlier windows: who is behind the spikes and dips on the rank ladder ─────
+// A window is an outlier when its offense / defense / triple rate sits far from the local trend. NOTE: ladderOutliers() and
+// thinLadderRows() are the same detection the bot (legendstats.js) uses to draw the hollow dots - keep the two copies identical.
+// For the 8 biggest outliers the players of the window are stored (name, rank, attacks, per-8 offense / defense, triple rate), so
+// the chart can name them instead of just guessing why a point is off.
+const medianOf = (arr) => { const s = arr.filter(Number.isFinite).sort((a, b) => a - b), m = s.length >> 1; return !s.length ? NaN : s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+function localMedian(rows, i, key) {
+  const lo = Math.max(0, i - 6);
+  return medianOf(rows.slice(lo, i + 7).filter((_, j) => lo + j !== i).map((r) => Number(r[key])));
+}
+function thinLadderRows(rows) {
+  return new Set(rows.filter((r, i) => {
+    const tp = localMedian(rows, i, 'players'), ta = localMedian(rows, i, 'attacks');
+    return (tp && r.players < tp * 0.75) || (ta && r.attacks < ta * 0.5);
+  }));
+}
+function ladderOutliers(rows, get, minDev, thin = new Set(), k = 8) {
+  const out = new Map();
+  rows.forEach((r, i) => {
+    const v = Number(get(r));
+    if (get(r) == null || !Number.isFinite(v)) return;
+    const near = [], pos = (row) => Math.log10(Math.max(1, row.rank));
+    for (let j = Math.max(0, i - k); j <= Math.min(rows.length - 1, i + k); j++) {
+      const w = j === i ? null : get(rows[j]);
+      if (w != null && Number.isFinite(Number(w))) near.push([pos(rows[j]), Number(w)]);
+    }
+    if (near.length < 5) return;
+    const slopes = [];
+    for (let a = 0; a < near.length; a++) for (let b = a + 1; b < near.length; b++) { const dq = near[b][0] - near[a][0]; if (dq) slopes.push((near[b][1] - near[a][1]) / dq); }
+    const slope = medianOf(slopes), icpt = medianOf(near.map(([q, w]) => w - slope * q));
+    const spread = 1.4826 * medianOf(near.map(([q, w]) => Math.abs(w - (slope * q + icpt)))), dev = v - (slope * pos(r) + icpt);
+    if (Math.abs(dev) > Math.max(minDev, (thin.has(r) ? 2.5 : 5) * spread)) out.set(r, dev);
+  });
+  return out;
+}
+function rankLadderOutliers(points, rows, firstAtLeast) {
+  const objs = points.map((p) => Object.fromEntries(RANK_LADDER_FIELDS.map((f, i) => [f, p[i]]))), thin = thinLadderRows(objs);
+  const minDev = { off8: 15, def8: 15, triple: 8 };
+  const flags = { off8: ladderOutliers(objs, (r) => r.off8, minDev.off8, thin), def8: ladderOutliers(objs, (r) => r.def8, minDev.def8, thin), triple: ladderOutliers(objs, (r) => r.triple, minDev.triple, thin) };
+  const sev = new Map();
+  for (const [metric, map] of Object.entries(flags)) for (const [r, dev] of map) {
+    const score = Math.abs(dev) / minDev[metric], cur = sev.get(r);
+    if (!cur || score > cur.score) sev.set(r, { score, metric, dev });
+  }
+  return [...sev.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 8).map(([r, { metric, dev }]) => {
+    const lo = firstAtLeast(Math.max(1, r.rank - RANK_WINDOW)), hi = firstAtLeast(r.rank + RANK_WINDOW + 1);
+    const players = rows.slice(lo, hi).map((p) => ({
+      tag: p.tag, name: p.n || p.tag, rank: p.r, attacks: p.na || 0, defenses: p.nd || 0,
+      off8: p.na ? +(8 * p.a / p.na).toFixed(1) : null, def8: p.nd ? +(8 * p.d / p.nd).toFixed(1) : null, triple: p.na ? +(100 * p.s3 / p.na).toFixed(1) : null,
+    }));
+    return { rank: r.rank, metric, dev: +dev.toFixed(1), players };
+  });
 }
 
 // ───── Armies and triple rates inside exact rank bands (feeds /legendstats "Armies by rank range") ─────
