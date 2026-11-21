@@ -115,7 +115,12 @@ function installArmyDaySummarizer(context) {
 const LALO_MIN_BALLOONS = 15, DRAG_LALO_MIN_DRAGONS = 2;
 function installArmyPerformers(context) {
   vm.runInContext(`globalThis.__armyPerformers = function(agg, cfg) {
-    const { minAttacks, keepPlayers, keepStrategies, keepPerformers, performerMinAttacks, laloBalloons, dragLaloDragons } = cfg;
+    const { minAttacks, keepPlayers, keepStrategies, keepPerformers, performerMinAttacks, laloBalloons, dragLaloDragons, eligible } = cfg;
+    // Only players from the season rows the leaderboards are built from can appear here, and their season totals are read from those
+    // same rows, so a performer shown below can always be found (with identical numbers) on the Best avg offense / Average triple rate boards.
+    const nt = (t) => String(t || '').replace(/^#/, '').toUpperCase();
+    const season = new Map((eligible || []).map((e) => [nt(e[0]), e]));
+    const useSeason = season.size > 0 && Object.keys(agg.players || {}).some((t) => season.has(nt(t)));
     const labels = new Map();
     const labelOf = (code) => {
       let hit = labels.get(code); if (hit) return hit;
@@ -147,6 +152,11 @@ function installArmyPerformers(context) {
     const strategies = new Map(), rows = [];
     for (const [tag, p] of Object.entries(agg.players || {})) {
       if (!(p.na || p.nd)) continue;
+      const srow = useSeason ? season.get(nt(tag)) : null;
+      if (useSeason && !srow) continue;
+      const sv = srow
+        ? { attacks: srow[3] || 0, triples: srow[4] || 0, days: srow[2] || 0, perDay: srow[2] ? +(srow[1] / srow[2]).toFixed(1) : null, rank: srow[5] || 0 }
+        : { attacks: p.na || 0, triples: p.s3 || 0, days: p.dy || 0, perDay: p.dy ? +(p.a / p.dy).toFixed(1) : null, rank: p.r || 0 };
       const mine = new Map(); let coded = 0;
       for (const [ci, v] of Object.entries(p.arm || {})) {
         const code = agg.codes[+ci]; if (!code) continue;
@@ -159,7 +169,7 @@ function installArmyPerformers(context) {
         g.n += v[0]; g.st += v[1]; g.s3 += v[2]; g.t += v[3];
         if (g.codes.has(code) || g.codes.size < 300) g.codes.set(code, (g.codes.get(code) || 0) + v[0]);
       }
-      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: p.r || 0, n: m.n, st: m.st, s3: m.s3, t: m.t, code: m.code, portal: m.portal });
+      for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: sv.rank, season: sv, n: m.n, st: m.st, s3: m.s3, t: m.t, code: m.code, portal: m.portal });
       if (p.na >= minAttacks && p.dy > 0) rows.push({ tag, p, mine: [...mine.values()].sort((a, b) => b.n - a.n || b.st - a.st), coded });
     }
     rows.sort((a, b) => b.p.a / b.p.dy - a.p.a / a.p.dy || (a.p.r || 1e9) - (b.p.r || 1e9));
@@ -178,7 +188,7 @@ function installArmyPerformers(context) {
       label: g.label, players: g.players.size, attacks: g.n, triples: g.s3, tripleRate: +(100 * g.s3 / g.n).toFixed(1), avgStars: +(g.st / g.n).toFixed(2), code: topCode(g.codes),
       performers: [...g.players.values()].filter((x) => x.n >= performerMinAttacks)
         .sort((a, b) => wilson(b.s3, b.n) - wilson(a.s3, a.n) || b.st / b.n - a.st / a.n || b.n - a.n).slice(0, keepPerformers)
-        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, code: x.code, portal: !!x.portal, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1) })),
+        .map((x) => ({ tag: x.tag, name: x.name || x.tag, rank: x.rank, code: x.code, portal: !!x.portal, attacks: x.n, triples: x.s3, tripleRate: +(100 * x.s3 / x.n).toFixed(1), avgStars: +(x.st / x.n).toFixed(2), avgTrophies: +(x.t / x.n).toFixed(1), season: x.season })),
     }));
     const codedAttacks = [...strategies.values()].reduce((n, g) => n + g.n, 0);
     return { minAttacks, performerMinAttacks, laloBalloons, dragLaloDragons, codedAttacks, avgOffense, mix, strategies: cards };
@@ -634,7 +644,8 @@ async function season() {
     const tripleDaily = buildTripleDaily(dayRows.map((d) => d.date), tripleDays);
     const rankLadder = computeRankLadder(raw);
     const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
-    const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
+    const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS,
+      eligible: (S.rows || []).map((r) => [r.tag, r.a, r.dy, r.na, r.s3, r.rank]) } });
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
     writeJson(`leaderboards/${key}.json`, {
