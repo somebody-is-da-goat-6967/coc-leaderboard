@@ -209,6 +209,91 @@ function buildTripleDaily(dates, perDay) {
   return { dates, tiers };
 }
 
+// Display name of an army family key ('family:super bowlers' -> 'Super Bowlers'). Openers never take part in a family.
+const FAMILY_NAMES = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons', lalo: 'LaLo' };
+function familyLabel(key) {
+  const family = String(key).replace(/^family:/, '');
+  return FAMILY_NAMES[family] || family.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ───── Average offense / defense around every rank (feeds /legendstats "Avg offense & defense by rank") ─────
+// For a centre rank R the window is every player ranked R-5 … R+5 (season rank). Offense is the trophies those players gained per 8 attacks
+// (a full Legend Day), defense the trophies they lost per 8 defenses, e.g. "+235 / 8" and "−200 / 8" at rank 1,000.
+// Centres: rank 1, every 5th rank up to 100, then every 25th rank to the end of the ladder (~14k players -> ~580 points).
+const RANK_WINDOW = 5;
+const RANK_LADDER_FIELDS = ['rank', 'players', 'attacks', 'defenses', 'off8', 'def8', 'triple'];
+function rankLadderCenters(maxRank) {
+  const centers = [1];
+  for (let r = 5; r <= Math.min(100, maxRank); r += 5) centers.push(r);
+  for (let r = 125; r <= maxRank; r += 25) centers.push(r);
+  return centers;
+}
+function computeRankLadder(agg) {
+  const rows = Object.values(agg.players || {}).filter((p) => p.r > 0 && (p.na || p.nd)).sort((a, b) => a.r - b.r);
+  if (!rows.length) return null;
+  const prefix = (pick) => { const out = [0]; for (const p of rows) out.push(out.at(-1) + (Number(pick(p)) || 0)); return out; };
+  const A = prefix((p) => p.a), D = prefix((p) => p.d), NA = prefix((p) => p.na), ND = prefix((p) => p.nd), S3 = prefix((p) => p.s3);
+  const firstAtLeast = (rank) => { let lo = 0, hi = rows.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (rows[mid].r >= rank) hi = mid; else lo = mid + 1; } return lo; };
+  const maxRank = rows.at(-1).r, points = [];
+  for (const center of rankLadderCenters(maxRank)) {
+    const lo = firstAtLeast(Math.max(1, center - RANK_WINDOW)), hi = firstAtLeast(center + RANK_WINDOW + 1), n = hi - lo;
+    const na = NA[hi] - NA[lo], nd = ND[hi] - ND[lo];
+    if (!n || na < 8) continue;
+    points.push([center, n, na, nd, +(8 * (A[hi] - A[lo]) / na).toFixed(1), nd ? +(8 * (D[hi] - D[lo]) / nd).toFixed(1) : null, +(100 * (S3[hi] - S3[lo]) / na).toFixed(1)]);
+  }
+  return points.length ? { window: RANK_WINDOW, maxRank, rankedPlayers: rows.length, fields: RANK_LADDER_FIELDS, points } : null;
+}
+
+// ───── Armies and triple rates inside exact rank bands (feeds /legendstats "Armies by rank range") ─────
+// Only players whose season rank lies inside the band count: nothing above or below it. Armies are opener-free army families
+// (infoOf(code).group), so Duke Charge and Queen Charge Super Bowlers are one "Super Bowlers" row.
+const ARMY_BANDS = [[1, 10], [11, 100], [101, 500], [501, 1000], [1001, 2500], [2501, 5000], [5001, 10000], [10001, Infinity]];
+const BAND_TOP_ARMIES = 8;
+const bandLabel = (min, max) => (min === 1 ? `Top ${fmtN(max)}` : max === Infinity ? `${fmtN(min)}+` : `${fmtN(min)}–${fmtN(max)}`);
+function computeArmyBands(agg, infoOf) {
+  const bands = ARMY_BANDS.map(([min, max]) => ({ min, max, players: 0, attacks: 0, defenses: 0, triples: 0, stars: 0, gained: 0, lost: 0, coded: 0, fam: new Map() }));
+  const familyOf = new Map();
+  const family = (code) => {
+    let key = familyOf.get(code);
+    if (key === undefined) { try { key = infoOf(code).group; } catch { key = null; } familyOf.set(code, key); }
+    return key;
+  };
+  for (const p of Object.values(agg.players || {})) {
+    if (!(p.r > 0) || !(p.na || p.nd)) continue;
+    const band = bands.find((b) => p.r >= b.min && p.r <= b.max);
+    if (!band) continue;
+    band.players++; band.attacks += p.na || 0; band.defenses += p.nd || 0; band.triples += p.s3 || 0; band.stars += p.st || 0; band.gained += p.a || 0; band.lost += p.d || 0;
+    const seen = new Set();
+    for (const [ci, v] of Object.entries(p.arm || {})) {
+      const code = agg.codes[+ci], key = code && family(code);
+      if (!key) continue;
+      band.coded += v[0];
+      let f = band.fam.get(key); if (!f) band.fam.set(key, (f = { key, uses: 0, st: 0, s3: 0, t: 0, players: 0, variants: new Map() }));
+      f.uses += v[0]; f.st += v[1]; f.s3 += v[2]; f.t += v[3];
+      if (!seen.has(key)) { seen.add(key); f.players++; }
+      if (f.variants.has(code) || f.variants.size < 300) f.variants.set(code, (f.variants.get(code) || 0) + v[0]);
+    }
+  }
+  return {
+    schema: 1,
+    bands: bands.map((b) => {
+      const ranked = [...b.fam.values()].sort((x, y) => y.uses - x.uses), top = ranked.slice(0, BAND_TOP_ARMIES), rest = ranked.slice(BAND_TOP_ARMIES);
+      return {
+        key: `${b.min}-${b.max === Infinity ? 'up' : b.max}`, label: bandLabel(b.min, b.max), min: b.min, max: b.max === Infinity ? null : b.max,
+        players: b.players, attacks: b.attacks, defenses: b.defenses, coded: b.coded, triples: b.triples,
+        tripleRate: b.attacks ? +(100 * b.triples / b.attacks).toFixed(1) : null, avgStars: b.attacks ? +(b.stars / b.attacks).toFixed(2) : null,
+        off8: b.attacks ? +(8 * b.gained / b.attacks).toFixed(1) : null, def8: b.defenses ? +(8 * b.lost / b.defenses).toFixed(1) : null,
+        armies: top.map((f) => ({
+          key: f.key, label: familyLabel(f.key), uses: f.uses, usageRate: b.coded ? +(100 * f.uses / b.coded).toFixed(1) : 0, players: f.players,
+          triples: f.s3, tripleRate: f.uses ? +(100 * f.s3 / f.uses).toFixed(1) : null, avgStars: f.uses ? +(f.st / f.uses).toFixed(2) : null,
+          avgTrophies: f.uses ? +(f.t / f.uses).toFixed(1) : null, code: [...f.variants].sort((x, y) => y[1] - x[1])[0]?.[0] || '',
+        })),
+        otherUses: rest.reduce((n, f) => n + f.uses, 0), otherTriples: rest.reduce((n, f) => n + f.s3, 0), otherArmies: rest.length,
+      };
+    }),
+  };
+}
+
 function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
   const dates = dayRows.map((d) => d.date), codedAttacks = dayRows.map((d) => d.codedAttacks || 0), codedTotal = codedAttacks.reduce((a, b) => a + b, 0), armies = new Map(), openers = new Map();
   dayRows.forEach((day, di) => {
@@ -219,10 +304,6 @@ function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
     }
   });
   const pct = (n, d) => d ? 100 * n / d : 0;
-  const familyLabel = (key) => {
-    const family = String(key).replace(/^family:/, ''), known = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons', lalo: 'LaLo' };
-    return known[family] || family.replace(/\b\w/g, (c) => c.toUpperCase());
-  };
   const armyRows = [...armies.values()].map((x) => {
     const code = [...x.variants].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
     return { key: x.key, code, label: familyLabel(x.key), uses: x.uses, usageRate: pct(x.uses, codedTotal), triples: x.triples, tripleRate: pct(x.triples, x.uses),
@@ -497,6 +578,8 @@ async function season() {
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
     const tripleDaily = buildTripleDaily(dayRows.map((d) => d.date), tripleDays);
+    const rankLadder = computeRankLadder(raw);
+    const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
     const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS } });
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
     writeGz(`${key}.json.gz`, { schema: 2, kind: 'season', key, computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null, S });
@@ -508,6 +591,8 @@ async function season() {
       armyTrend: S.armyTrend,
       armyPerformers,
       tripleDaily,
+      rankLadder,
+      armyBands,
     });
 
   }
