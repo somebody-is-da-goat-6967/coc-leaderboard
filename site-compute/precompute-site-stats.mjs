@@ -93,7 +93,7 @@ function sameSeason(dateA, dateB, anchor, seasonDays) {
 
 function installArmyDaySummarizer(context) {
   vm.runInContext(`globalThis.__summarizeArmyDay = function(date, players) {
-    const armies = {}, openers = {}; let codedAttacks = 0;
+    const armies = {}, openers = {}, equipment = {}; let codedAttacks = 0;
     const add = (map, key, code, triple) => {
       const x = map[key] || (map[key] = { uses: 0, triples: 0, variants: {} });
       x.uses++; if (triple) x.triples++;
@@ -104,8 +104,16 @@ function installArmyDaySummarizer(context) {
       const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++;
       add(armies, info.group, code, triple);
       add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', code, triple);
+      const seenEquip = new Set();
+      for (const hero of info.heroes || []) for (const gear of hero.equip || []) {
+        const name = typeof gear === 'string' ? gear : gear && gear.name;
+        if (!name || seenEquip.has(name)) continue;
+        seenEquip.add(name);
+        const e = equipment[name] || (equipment[name] = { uses: 0, triples: 0, hero: hero.name || '' });
+        e.uses++; if (triple) e.triples++;
+      }
     }
-    return { date: String(date).slice(0, 10), codedAttacks, armies, openers };
+    return { date: String(date).slice(0, 10), codedAttacks, armies, openers, equipment };
   };`, context);
 }
 
@@ -394,6 +402,25 @@ function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
   return { dates, codedAttacks, codedAttackTotal: codedTotal, armies: armyRows, openers: openerRows };
 }
 
+// Hero equipment usage per Legend Day (feeds /legendstats "Equipment usage"). An attack counts once for every distinct piece it carried,
+// so the usage rates (share of attacks with a known army) add up to more than 100%.
+const EQUIPMENT_KEEP = 12;
+function precomputeEquipmentTrend(dayRows) {
+  const dates = dayRows.map((d) => d.date), coded = dayRows.map((d) => d.codedAttacks || 0), total = coded.reduce((a, b) => a + b, 0), map = new Map();
+  dayRows.forEach((day, di) => {
+    for (const [name, v] of Object.entries(day.equipment || {})) {
+      let x = map.get(name); if (!x) map.set(name, (x = { name, hero: v.hero || '', uses: 0, triples: 0, daily: Array.from({ length: dayRows.length }, () => ({ uses: 0, triples: 0 })) }));
+      x.uses += v.uses || 0; x.triples += v.triples || 0; x.daily[di].uses = v.uses || 0; x.daily[di].triples = v.triples || 0;
+    }
+  });
+  const pct = (n, d) => d ? +(100 * n / d).toFixed(2) : 0;
+  const equipment = [...map.values()].sort((a, b) => b.uses - a.uses).slice(0, EQUIPMENT_KEEP).map((x) => ({
+    name: x.name, hero: x.hero, uses: x.uses, triples: x.triples, usageRate: pct(x.uses, total), tripleRate: x.uses ? pct(x.triples, x.uses) : null,
+    daily: x.daily.map((v, i) => ({ uses: v.uses, triples: v.triples, usageRate: pct(v.uses, coded[i]), tripleRate: v.uses ? pct(v.triples, v.uses) : null })),
+  }));
+  return { schema: 1, dates, codedAttacks: coded, codedAttackTotal: total, equipment };
+}
+
 async function daily() {
   const idx = readJson(path.join(dataDir, 'battlelogs', 'index.json'));
   const meta = readJson(path.join(dataDir, 'meta.json'));
@@ -641,6 +668,7 @@ async function season() {
     }
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
+    const equipmentTrend = precomputeEquipmentTrend(dayRows);
     const tripleDaily = buildTripleDaily(dayRows.map((d) => d.date), tripleDays);
     const rankLadder = computeRankLadder(raw);
     const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
@@ -654,6 +682,7 @@ async function season() {
       computedAt: isoNow(), sourceGeneratedAt: raw.generatedAt || null,
       leaderboards: seasonLeaderboards(S),
       armyTrend: S.armyTrend,
+      equipmentTrend,
       armyPerformers,
       tripleDaily,
       rankLadder,
