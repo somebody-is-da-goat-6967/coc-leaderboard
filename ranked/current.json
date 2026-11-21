@@ -1,0 +1,40 @@
+{
+ "weekKey": "2026-11-16",
+ "start": "2026-11-16T17:00:00.000Z",
+ "end": "2026-11-22T05:00:00.000Z",
+ "updatedAt": "2026-11-21T22:53:49.555Z",
+ "mode": "trophies",
+ "tagsInSeed": 80374,
+ "crawledThisRun": 613,
+ "failedThisRun": 0,
+ "logsDueAtStart": 613,
+ "groupsDueAtStart": 26210,
+ "groupsNeverFetchedAtStart": 0,
+ "profilesDueAtStart": 32818,
+ "incompleteAtStart": 31,
+ "incompleteLeft": 31,
+ "apiErrors": {
+  "leaguegroup:525": 5,
+  "leaguegroup:520": 5
+ },
+ "apiErrorSamples": {
+  "leaguegroup:525": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-525/\",\"title\":\"Error 525: SSL handshake failed\",\"status\":525,\"detail\":\"The SSL/TLS handshake between Cloudflare and the origin server failed. The origin's SSL configuration is not compati",
+  "leaguegroup:520": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/\",\"title\":\"Error 520: Web server is returning an unknown error\",\"status\":520,\"detail\":\"The origin web server sent a response that Cloudflare could not parse. This may indicate the ori"
+ },
+ "gapsThisRun": 0,
+ "groupsThisRun": 12347,
+ "groupMembersUpdated": 14869,
+ "profilesThisRun": 3209,
+ "callsUsed": 16200,
+ "callBudget": 16200,
+ "playersTracked": 80507,
+ "playersWithBattles": 57629,
+ "playersWithLeague": 80476,
+ "playersWithGroupData": 45751,
+ "battles": 1680278,
+ "battleTypesSeen": {
+  "ranked": 9718,
+  "homevillage": 18103,
+  "legend": 64
+ }
+}
