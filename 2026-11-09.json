@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-08",
+ "players": 11570,
+ "attacks": 86961,
+ "defenses": 86980,
+ "perfectDays": 120,
+ "zeroStarDefenses": 349,
+ "tripleRate": 0.4430491829670772,
+ "shielded": 2323,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+142",
+   "name": "DSM♦️ HOS99",
+   "tag": "9CC8QQGR9",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:11",
+   "name": "Anvar",
+   "tag": "PGUJQQR20",
+   "tied": 1
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−148",
+   "name": "⚡️T/B⚡️ SALOMOV",
+   "tag": "9LCJ0P0UY",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "حـرب",
+   "tag": "2LY92LQU9",
+   "tied": 2
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,938",
+   "name": "J@§U€©®",
+   "tag": "Y8QPC2PJU",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+11,260",
+   "name": "夕阳賊帅气",
+   "tag": "VYLU828",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "✧MAGIC⭐IQ✧",
+   "tag": "YLQ2G8J0P",
+   "tied": 1
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Duke Charge (Fox) + Dragon Riders",
+  "players": 202,
+  "attacks": 1541,
+  "tripleRate": 0.5379623621025308,
+  "avgStars": 2.4665801427644385,
+  "code": "h2m1p16e4_34-4p4e6_13-6p17e43_49-7p10e52_59i1x188-1x5-2x65d1x70-1x98u1x17-8x65-3x63-1x23-7x57-1x6-1x10-1x0-4x1s2x5-1x9-6x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2372,
+  "share": 0.2146217879116902
+ }
+}

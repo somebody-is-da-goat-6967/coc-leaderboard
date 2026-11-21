@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-07",
+ "players": 11638,
+ "attacks": 87984,
+ "defenses": 88011,
+ "perfectDays": 121,
+ "zeroStarDefenses": 351,
+ "tripleRate": 0.4406369339879978,
+ "shielded": 2256,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+143",
+   "name": "RZ☆★☆Tomanè☆★☆",
+   "tag": "QPLLVG9CR",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:06",
+   "name": "♪侯賽因⚜ＨＡＫ．ＩＱ",
+   "tag": "2LYUVLLUU",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−147",
+   "name": "mirali(3)",
+   "tag": "L9UCG0GQG",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "muxa",
+   "tag": "280PVL0G",
+   "tied": 2
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,926",
+   "name": "99%✨M",
+   "tag": "LCQ2RJU2J",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+11,486",
+   "name": "LP⚜️Erick_HN",
+   "tag": "8CRVJJVQC",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+5",
+   "name": "ARYA⚡️GENERAL",
+   "tag": "PJY89Y0Q2",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "02:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Warden Fireball Opener + Drag LaLo",
+  "players": 110,
+  "attacks": 829,
+  "tripleRate": 0.5283474065138721,
+  "avgStars": 2.459589867310012,
+  "code": "h2m1p16e22_5-4p4e6_13-6p17e49_61-7p11e59_56i1x63-1x76d2x70u2x76-5x8-3x84-2x23-21x5-3x10-5x1-1x188s3x5-1x9-2x10-3x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2456,
+  "share": 0.22048657868749438
+ }
+}

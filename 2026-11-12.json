@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-11",
+ "players": 11628,
+ "attacks": 91053,
+ "defenses": 91034,
+ "perfectDays": 122,
+ "zeroStarDefenses": 236,
+ "tripleRate": 0.4448947316398142,
+ "shielded": 2519,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+145",
+   "name": "CNF Lurmii",
+   "tag": "QQPC2JCPP",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:04",
+   "name": "Yuko⚔️PA",
+   "tag": "QUCJQGPL",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−151",
+   "name": "未能看过北凉雪",
+   "tag": "PV8GL2G9",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Bình",
+   "tag": "QJQURUPC8",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 13,385",
+   "name": "STARs⭐️MAD☆★☆★",
+   "tag": "L20VVGLPQ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+12,467",
+   "name": "江上✨云深不知处",
+   "tag": "8G9RQL9JJ",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+127",
+   "name": "UNKNOWN SPENCE",
+   "tag": "2YCG80J08",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "04:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Duke Charge (Fox) + Dragon Riders",
+  "players": 201,
+  "attacks": 1515,
+  "tripleRate": 0.5478547854785478,
+  "avgStars": 2.4739273927392738,
+  "code": "h2m1p16e4_34-4p4e6_13-6p17e43_49-7p10e52_59i1x188-1x5-2x65d1x70-1x98u1x17-8x65-3x63-1x23-7x57-1x6-1x10-1x0-4x1s2x5-1x9-6x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2462,
+  "share": 0.21500305650161558
+ }
+}

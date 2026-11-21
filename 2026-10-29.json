@@ -1,0 +1,76 @@
+{
+ "date": "2026-10-28",
+ "players": 11732,
+ "attacks": 92097,
+ "defenses": 92108,
+ "perfectDays": 80,
+ "zeroStarDefenses": 330,
+ "tripleRate": 0.4319467517943038,
+ "shielded": 2119,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+246",
+   "name": "⭐️ Lawoke ⭐️",
+   "tag": "2LP220R9J",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:03",
+   "name": "MN Duy Quang",
+   "tag": "QQ90PJVQJ",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−123",
+   "name": "GANGSTER-IREEN",
+   "tag": "Q920VYV09",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "boss11",
+   "tag": "CC8LCCQJ",
+   "tied": 3
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,267",
+   "name": "KingScofield",
+   "tag": "PVRU88C",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+7,918",
+   "name": "dIs♦️ ALYOUSEF",
+   "tag": "9YVPPJGLC",
+   "tied": 0
+  },
+  {
+   "label": "TOP OFFENSE",
+   "value": "+320",
+   "players": 80
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + Dragon Riders",
+  "players": 49,
+  "attacks": 379,
+  "tripleRate": 0.5725593667546174,
+  "avgStars": 2.490765171503958,
+  "code": "h1p9e48_17-2m1p16e4_34-6p4e49_43-7p11e53_52i1x5-2x65d1x70-1x98u1x17-9x65-3x63-1x23-4x57-2x10-2x0-4x1-1x188s2x5-1x9-5x10-3x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2464,
+  "share": 0.21259706643658327
+ }
+}

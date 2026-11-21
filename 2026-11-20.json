@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-19",
+ "players": 11385,
+ "attacks": 88830,
+ "defenses": 88721,
+ "perfectDays": 18,
+ "zeroStarDefenses": 266,
+ "tripleRate": 0.3076325565687268,
+ "shielded": 2948,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+141",
+   "name": "•DZ⚜Legacy™︎",
+   "tag": "20GLG8UV0",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:09",
+   "name": "VadO",
+   "tag": "GQ2C829VG",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−127",
+   "name": "Alucard",
+   "tag": "2YJGU0RC",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "•DZ⚜Legacy™︎",
+   "tag": "20GLG8UV0",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,834",
+   "name": "Scoutz",
+   "tag": "RL9QGRQG",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,453",
+   "name": "DarkRiver",
+   "tag": "2VP288JQG",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+48",
+   "name": "^☆NENJA 2☆^",
+   "tag": "9U8QLU99P",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "17:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Fireball + Backpack Blower + LaLo Precision Dive",
+  "players": 311,
+  "attacks": 2321,
+  "tripleRate": 0.4049978457561396,
+  "avgStars": 2.2839293408013788,
+  "code": "h2m1p16e5_22-4p4e6_13-6p17e61_49-7p11e57_53i1x188-1x5-1x63-1x76d4x35u2x76-4x63-1x23-5x5-7x10-3x1-10x199s3x5-1x9-3x10-1x11-1x70-1x120"
+ },
+ "mostUsed": {
+  "name": "Super Bowler Smash",
+  "players": 4297,
+  "share": 0.38348951360999556
+ }
+}

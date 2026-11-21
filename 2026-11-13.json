@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-12",
+ "players": 11651,
+ "attacks": 90492,
+ "defenses": 90381,
+ "perfectDays": 121,
+ "zeroStarDefenses": 262,
+ "tripleRate": 0.43862440878751713,
+ "shielded": 2488,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+159",
+   "name": "ＪＳＴＮ 〆",
+   "tag": "2JUUQ92P9",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:02",
+   "name": "AJKing",
+   "tag": "2GYGU028",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−147",
+   "name": "Hansen",
+   "tag": "9R898JRGC",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "亗『KOVLI』亗",
+   "tag": "92Y0989R9",
+   "tied": 3
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 12,920",
+   "name": "Dalph",
+   "tag": "G9G9GQPCQ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+2,334",
+   "name": "Ekwaak77",
+   "tag": "2QVQ0J2PQ",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+86",
+   "name": "WHSH~Saoud2",
+   "tag": "288JQ29GV",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "02:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Throwers",
+  "players": 1295,
+  "attacks": 9990,
+  "tripleRate": 0.5094094094094094,
+  "avgStars": 2.3967967967967967,
+  "code": "h0p9e14_32-1p3e39_48-2p16e24_5-7p4e52_60i2x10-1x5-2x57-2x58d2x109-1x9-1x5u1x123-9x132-5x7-3x109-1x23-3x28-2x5-1x135s1x70-3x98-3x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2430,
+  "share": 0.2131765944381086
+ }
+}
