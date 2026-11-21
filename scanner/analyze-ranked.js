@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 8;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19
+const SCRIPT_REV = 9;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19, 9 = offense / defense trophies completed from the league trophy total when the battle log is partial
 const MIN_TH = 7, MAX_TH = 19;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -213,8 +213,8 @@ const METRICS = {
   most3:   { has: r => r.la > 0, qual: r => r.la > 0, cmp: (a, b) => b.s3 - a.s3 || b.na - a.na },
   defense: { has: r => r.ld > 0, qual: r => r.nd >= MIN_DEF && r.ld > 0, cmp: (a, b) => a.dst / a.ld - b.dst / b.ld || b.nd - a.nd },
   zero:    { has: r => r.ld > 0, qual: r => r.ld > 0, cmp: (a, b) => b.dz - a.dz || b.nd - a.nd },
-  offtr:   { has: r => r.la > 0, qual: r => r.la > 0, cmp: (a, b) => b.ot - a.ot || b.na - a.na },   // trophies won attacking
-  deftr:   { has: r => r.ld > 0, qual: r => r.ld > 0, cmp: (a, b) => b.dt - a.dt || b.nd - a.nd },   // trophies won defending
+  offtr:   { has: r => r.la > 0 || !!r.oe, qual: r => r.la > 0 || !!r.oe, cmp: (a, b) => b.ot - a.ot || b.na - a.na },   // trophies won attacking
+  deftr:   { has: r => r.ld > 0 || !!r.de, qual: r => r.ld > 0 || !!r.de, cmp: (a, b) => b.dt - a.dt || b.nd - a.nd },   // trophies won defending
   fastest: { has: r => r.fast != null, qual: r => r.fast != null, cmp: (a, b) => a.fast - b.fast },
 };
 const tieCmp = (a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0);
@@ -389,6 +389,21 @@ function processWeek(opts, key) {
       }
       if (row.na || row.nd) for (const t of targets) t.G.players++;
       if (row.na >= MIN_ATK) for (const t of targets) t.G.active++;
+      // Trophies the battle log can't show. The log only keeps the latest battles, so a player who gets attacked a lot (the top of the
+      // table) has most of their attacks scrolled out of it: their logged offense trophies came out tiny while their total was #1.
+      // The game's own total is exact: league trophies = attack trophies + defense trophies (true to the point for 783 of 785 players
+      // with a complete log). So what the logged battles don't explain (R) belongs to the missing attacks and missing defenses.
+      // Each missing battle is worth 0-40; the missing defenses are valued at the player's own logged average, kept inside those bounds.
+      if (row.hasLg && (row.la < row.na || row.ld < row.nd)) {
+        const mA = row.na - row.la, mD = row.nd - row.ld, R = row.tr - row.ot - row.dt;
+        if (R >= 0 && R <= 40 * (mA + mD)) {   // anything else means the total doesn't add up for this player: keep the logged values
+          const guess = Math.round(mD * (row.ld ? row.dt / row.ld : 20));   // 20 = a middling defense when none was logged
+          const defMiss = Math.max(Math.max(0, R - 40 * mA), Math.min(R, 40 * mD, guess));
+          row.ot += R - defMiss; row.dt += defMiss;
+          if (mA > 0) row.oe = 1;   // offense trophies include an estimate for the attacks the log no longer has
+          if (mD > 0) row.de = 1;
+        }
+      }
       row.w3 = wilson(row.s3, row.la);
 
       // armies: group similar codes (same main-army troop types); the player's most used group is "their army"
