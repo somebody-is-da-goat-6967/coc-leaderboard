@@ -25,7 +25,8 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 10;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19, 9 = offense / defense trophies completed from the league trophy total when the battle log is partial; 10 = equipment id 61 is named Portal Pendant instead of "#61"
+const SCRIPT_REV = 11;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19, 9 = offense / defense trophies completed from the league trophy total when the battle log is partial; 10 = equipment id 61 is named Portal Pendant instead of "#61"; 11 = the 3★ count (s3x) is completed from the league trophy total too when the battle log is partial, and ranks the "most 3★" list
+const NON3_AVG_TROPHIES = 23;                // what a non-3★ attack is worth on average (22.6 measured over 13,662 complete logs, 23.6 for 600+ trophy players); only used to guess how many missing attacks were 3★
 const MIN_TH = 7, MAX_TH = 19;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -213,7 +214,7 @@ const METRICS = {
   league:  { has: r => r.hasLg, qual: r => r.hasLg, cmp: (a, b) => b.tr - a.tr, sub: r => r.lid },
   attack:  { has: r => r.la > 0, qual: r => r.na >= MIN_ATK && r.la > 0, cmp: (a, b) => b.w3 - a.w3 || b.na - a.na },
   stars:   { has: r => r.la > 0, qual: r => r.na >= MIN_ATK && r.la > 0, cmp: (a, b) => b.st / b.la - a.st / a.la || b.na - a.na },
-  most3:   { has: r => r.la > 0, qual: r => r.la > 0, cmp: (a, b) => b.s3 - a.s3 || b.na - a.na },
+  most3:   { has: r => r.la > 0 || r.s3x != null, qual: r => r.la > 0 || r.s3x != null, cmp: (a, b) => (b.s3x ?? b.s3) - (a.s3x ?? a.s3) || b.na - a.na },
   defense: { has: r => r.ld > 0, qual: r => r.nd >= MIN_DEF && r.ld > 0, cmp: (a, b) => a.dst / a.ld - b.dst / b.ld || b.nd - a.nd },
   zero:    { has: r => r.ld > 0, qual: r => r.ld > 0, cmp: (a, b) => b.dz - a.dz || b.nd - a.nd },
   offtr:   { has: r => r.la > 0 || !!r.oe, qual: r => r.la > 0 || !!r.oe, cmp: (a, b) => b.ot - a.ot || b.na - a.na },   // trophies won attacking
@@ -255,7 +256,7 @@ function rankPools(rows, groupFn) {
   return { ranks, lists };
 }
 
-const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, la: r.la, ld: r.ld, st: r.st, s3: r.s3, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid, ot: r.ot, dt: r.dt });
+const topRow = r => ({ tag: r.tag, name: r.name, th: r.th, na: r.na, nd: r.nd, la: r.la, ld: r.ld, st: r.st, s3: r.s3, s3x: r.s3x, pct: r.pct, dz: r.dz, d3: r.d3, dst: r.dst, fast: r.fast, tr: r.tr, ln: r.ln, lid: r.lid, ot: r.ot, dt: r.dt });
 const tops = L => ({
   attack: (L.attack || []).slice(0, TOP_N).map(topRow), stars: (L.stars || []).slice(0, TOP_N).map(topRow),
   most3: (L.most3 || []).slice(0, TOP_N).map(topRow), defense: (L.defense || []).slice(0, TOP_N).map(topRow),
@@ -280,7 +281,7 @@ function rankPool(L) {
     league,
     attack: (L.attack || []).map(r => [r6(r.w3), r.na]),
     stars: (L.stars || []).map(r => [r6(r.st / r.la), r.na]),
-    most3: (L.most3 || []).map(r => [r.s3, r.na]),
+    most3: (L.most3 || []).map(r => [r.s3x ?? r.s3, r.na]),
     defense: (L.defense || []).map(r => [r6(r.dst / r.ld), r.nd]),
     zero: (L.zero || []).map(r => [r.dz, r.nd]),
     offtr: (L.offtr || []).map(r => [r.ot, r.na]),
@@ -402,9 +403,20 @@ function processWeek(opts, key) {
         if (R >= 0 && R <= 40 * (mA + mD)) {   // anything else means the total doesn't add up for this player: keep the logged values
           const guess = Math.round(mD * (row.ld ? row.dt / row.ld : 20));   // 20 = a middling defense when none was logged
           const defMiss = Math.max(Math.max(0, R - 40 * mA), Math.min(R, 40 * mD, guess));
+          const otLogged = row.ot;
           row.ot += R - defMiss; row.dt += defMiss;
-          if (mA > 0) row.oe = 1;   // offense trophies include an estimate for the attacks the log no longer has
           if (mD > 0) row.de = 1;
+          if (mA > 0) {
+            row.oe = 1;   // offense trophies include an estimate for the attacks the log no longer has
+            // The missing attacks earned M trophies between them. A 3★ is exactly 40; anything else is at most 32, and averages about v
+            // (the player's own logged non-3★ average, pulled toward the pool average while they have few of them). Solve for how many were 3★,
+            // kept inside what is possible: at least (M - 32*mA)/8 of them, at most M/40. row.s3 stays the logged count (rates and
+            // army stats are fair samples of it); row.s3x is the full-week count and only the "most 3★" ranking uses it.
+            const M = R - defMiss, non3 = row.la - row.s3, PRIOR = 5;
+            const v = (otLogged - 40 * row.s3 + PRIOR * NON3_AVG_TROPHIES) / (non3 + PRIOR);
+            const hi = Math.min(mA, Math.floor(M / 40)), lo = Math.min(hi, Math.max(0, Math.ceil((M - 32 * mA) / 8)));
+            row.s3x = row.s3 + Math.max(lo, Math.min(hi, Math.round((M - v * mA) / (40 - v))));
+          }
         }
       }
       row.w3 = wilson(row.s3, row.la);
