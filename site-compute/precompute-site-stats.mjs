@@ -161,8 +161,9 @@ function installArmyPerformers(context) {
         if (isSiegeId(id)) continue;
         const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
       }
-      const balloons = counts.get('Balloon') || 0, dragons = counts.get('Dragon') || 0;
-      let label = cls.strategy || 'Unknown Build';
+      // Many balloons (plain or Rocket) = LaLo; the name "Rocket Balloons" is never shown.
+      const balloons = (counts.get('Balloon') || 0) + (counts.get('Rocket Balloon') || 0), dragons = counts.get('Dragon') || 0;
+      let label = (cls.strategy || 'Unknown Build').replace(/Rocket Balloons?/g, 'LaLo');
       if (balloons >= laloBalloons) {
         const core = dragons >= dragLaloDragons ? 'Drag LaLo' : 'LaLo', opener = cls.openerRaw || 'Spam Opener';
         label = opener === 'Spam' ? 'Totem Spam + ' + core : opener === 'Spam Opener' ? core : cls.opener + ' + ' + core;
@@ -252,11 +253,13 @@ function buildTripleDaily(dates, perDay) {
 }
 
 // Display name of an army family key ('family:super bowlers' -> 'Super Bowlers'). Openers never take part in a family.
-const FAMILY_NAMES = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'Rocket Balloons', lalo: 'LaLo' };
+const FAMILY_NAMES = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'LaLo', lalo: 'LaLo' }; // a balloon-heavy army is called LaLo, never "Rocket Balloons"
 function familyLabel(key) {
   const family = String(key).replace(/^family:/, '');
   return FAMILY_NAMES[family] || family.replace(/\b\w/g, (c) => c.toUpperCase());
 }
+// Families that share a display name are one family (e.g. 'family:rocket balloons' and 'family:lalo' are both LaLo).
+const canonicalFamily = (key) => (familyLabel(key) === 'LaLo' ? 'family:lalo' : key);
 
 // ───── Average offense / defense around every rank (feeds /legendstats "Avg offense & defense by rank") ─────
 // For a centre rank R the window is every player ranked R-5 … R+5 (season rank). Offense is the trophies those players gained per 8 attacks
@@ -351,7 +354,7 @@ function computeArmyBands(agg, infoOf) {
   const familyOf = new Map();
   const family = (code) => {
     let key = familyOf.get(code);
-    if (key === undefined) { try { key = infoOf(code).group; } catch { key = null; } familyOf.set(code, key); }
+    if (key === undefined) { try { key = canonicalFamily(infoOf(code).group); } catch { key = null; } familyOf.set(code, key); }
     return key;
   };
   for (const p of Object.values(agg.players || {})) {
@@ -393,9 +396,10 @@ function computeArmyBands(agg, infoOf) {
 function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
   const dates = dayRows.map((d) => d.date), codedAttacks = dayRows.map((d) => d.codedAttacks || 0), codedTotal = codedAttacks.reduce((a, b) => a + b, 0), armies = new Map(), openers = new Map();
   dayRows.forEach((day, di) => {
-    for (const [map, values] of [[armies, day.armies || {}], [openers, day.openers || {}]]) for (const [key, v] of Object.entries(values)) {
+    for (const [map, values] of [[armies, day.armies || {}], [openers, day.openers || {}]]) for (const [rawKey, v] of Object.entries(values)) {
+      const key = map === armies ? canonicalFamily(rawKey) : rawKey;
       let x = map.get(key); if (!x) map.set(key, (x = { key, uses: 0, triples: 0, variants: new Map(), daily: Array.from({ length: dayRows.length }, () => ({ uses: 0, triples: 0 })) }));
-      x.uses += v.uses || 0; x.triples += v.triples || 0; x.daily[di].uses = v.uses || 0; x.daily[di].triples = v.triples || 0;
+      x.uses += v.uses || 0; x.triples += v.triples || 0; x.daily[di].uses += v.uses || 0; x.daily[di].triples += v.triples || 0; // += so merged families add up
       for (const [code, n] of Object.entries(v.variants || {})) x.variants.set(code, (x.variants.get(code) || 0) + n);
     }
   });
@@ -428,7 +432,8 @@ function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
 
 // Hero equipment usage per Legend Day (feeds /legendstats "Equipment usage"). An attack counts once for every distinct piece it carried,
 // so the usage rates (share of attacks with a known army) add up to more than 100%.
-const EQUIPMENT_KEEP = 12;
+// The top EQUIPMENT_PER_HERO pieces of every hero are kept (the bot draws one block per hero), instead of one overall top list.
+const EQUIPMENT_PER_HERO = 3;
 function precomputeEquipmentTrend(dayRows) {
   const dates = dayRows.map((d) => d.date), coded = dayRows.map((d) => d.codedAttacks || 0), total = coded.reduce((a, b) => a + b, 0), map = new Map();
   dayRows.forEach((day, di) => {
@@ -438,11 +443,16 @@ function precomputeEquipmentTrend(dayRows) {
     }
   });
   const pct = (n, d) => d ? +(100 * n / d).toFixed(2) : 0;
-  const equipment = [...map.values()].sort((a, b) => b.uses - a.uses).slice(0, EQUIPMENT_KEEP).map((x) => ({
+  const perHero = new Map();
+  for (const x of [...map.values()].sort((a, b) => b.uses - a.uses)) {
+    const hero = x.hero || 'Other', list = perHero.get(hero) || perHero.set(hero, []).get(hero);
+    if (list.length < EQUIPMENT_PER_HERO) list.push(x);
+  }
+  const equipment = [...perHero.values()].flat().sort((a, b) => b.uses - a.uses).map((x) => ({
     name: x.name, hero: x.hero, uses: x.uses, triples: x.triples, usageRate: pct(x.uses, total), tripleRate: x.uses ? pct(x.triples, x.uses) : null,
     daily: x.daily.map((v, i) => ({ uses: v.uses, triples: v.triples, usageRate: pct(v.uses, coded[i]), tripleRate: v.uses ? pct(v.triples, v.uses) : null })),
   }));
-  return { schema: 1, dates, codedAttacks: coded, codedAttackTotal: total, equipment };
+  return { schema: 2, perHero: EQUIPMENT_PER_HERO, dates, codedAttacks: coded, codedAttackTotal: total, equipment };
 }
 
 async function daily() {
