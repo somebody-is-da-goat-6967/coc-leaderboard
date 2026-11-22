@@ -173,9 +173,12 @@ function installArmyDaySummarizer(context) {
 // Strategy names follow the community naming: 15+ Balloons = LaLo, LaLo with a few Dragons = Drag LaLo.
 // Everything else keeps the site's own strategy name = opener + army, like the website's "Top performers by strategy" (e.g. 'Zap Backpack + Super Bowler Smash').
 const LALO_MIN_BALLOONS = 15, DRAG_LALO_MIN_DRAGONS = 2;
+// Players who skipped this many Legend Days (days without an attack out of the days played so far) are left off the Avg offense armies board:
+// a per-day average over a few days says little about how well the army actually performs.
+const MAX_MISSED_DAYS = 15;
 function installArmyPerformers(context) {
   vm.runInContext(`globalThis.__armyPerformers = function(agg, cfg) {
-    const { minAttacks, keepPlayers, keepStrategies, keepPerformers, performerMinAttacks, laloBalloons, dragLaloDragons, eligible } = cfg;
+    const { minAttacks, keepPlayers, keepStrategies, keepPerformers, performerMinAttacks, laloBalloons, dragLaloDragons, eligible, totalDays, maxMissedDays } = cfg;
     // Only players from the season rows the leaderboards are built from can appear here, and their season totals are read from those
     // same rows, so a performer shown below can always be found (with identical numbers) on the Best avg offense / Average triple rate boards.
     const nt = (t) => String(t || '').replace(/^#/, '').toUpperCase();
@@ -214,7 +217,8 @@ function installArmyPerformers(context) {
         if (g.codes.has(code) || g.codes.size < 300) g.codes.set(code, (g.codes.get(code) || 0) + v[0]);
       }
       for (const m of mine.values()) strategies.get(m.label).players.set(tag, { tag, name: p.n, rank: sv.rank, season: sv, n: m.n, st: m.st, s3: m.s3, t: m.t, code: m.code, portal: m.portal });
-      if (p.na >= minAttacks && p.dy > 0) rows.push({ tag, p, mine: [...mine.values()].sort((a, b) => b.n - a.n || b.st - a.st), coded });
+      const missedDays = totalDays ? totalDays - (sv.days || 0) : 0;
+      if (p.na >= minAttacks && p.dy > 0 && !(maxMissedDays && missedDays >= maxMissedDays)) rows.push({ tag, p, mine: [...mine.values()].sort((a, b) => b.n - a.n || b.st - a.st), coded });
     }
     rows.sort((a, b) => b.p.a / b.p.dy - a.p.a / a.p.dy || (a.p.r || 1e9) - (b.p.r || 1e9));
     const avgOffense = rows.slice(0, keepPlayers).map(({ tag, p, mine, coded }) => {
@@ -759,6 +763,7 @@ async function season() {
     const rankLadder = computeRankLadder(raw);
     const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
     const armyPerformers = await call(context, '__armyPerformers(__input.agg, __input.cfg)', { agg: raw, cfg: { minAttacks: 8, keepPlayers: 50, keepStrategies: 12, keepPerformers: 3, performerMinAttacks: 10, laloBalloons: LALO_MIN_BALLOONS, dragLaloDragons: DRAG_LALO_MIN_DRAGONS,
+      totalDays: raw.days?.length || 0, maxMissedDays: MAX_MISSED_DAYS,
       eligible: (S.rows || []).map((r) => [r.tag, r.a, r.dy, r.na, r.s3, r.rank]) } });
     console.log(`[precompute:season] ${key}: heap ${heapMb()} MB after the daily summaries`);
     console.log(`[precompute:season] ${key}: ${dayRows.length} days, ${S.armyTrend.armies.length} armies, ${S.armyTrend.openers.length} openers`);
