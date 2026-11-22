@@ -481,7 +481,7 @@ function precomputeStrategyTrend(dayRows) {
 // Hero equipment usage per Legend Day (feeds /legendstats "Equipment usage"). An attack counts once for every distinct piece it carried,
 // so the usage rates (share of attacks with a known army) add up to more than 100%.
 // The top EQUIPMENT_PER_HERO pieces of every hero are kept (the bot draws one block per hero), instead of one overall top list.
-const EQUIPMENT_PER_HERO = 3;
+const EQUIPMENT_PER_HERO = 5;
 function precomputeEquipmentTrend(dayRows) {
   const dates = dayRows.map((d) => d.date), coded = dayRows.map((d) => d.codedAttacks || 0), total = coded.reduce((a, b) => a + b, 0), map = new Map();
   dayRows.forEach((day, di) => {
