@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 // ---------- config ----------
 const SCHEMA = 1;
-const SCRIPT_REV = 9;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19, 9 = offense / defense trophies completed from the league trophy total when the battle log is partial
+const SCRIPT_REV = 10;                      // bump when the script's OUTPUT changes (it is part of the input hash, so weeks rebuild); 2 = added ranks/th<N>.json, 3 = army groups carry icon paths, 4 = scopes' tops.trophies (league, then trophies), 5 = offense / defense trophies (ot, dt, tops.offtr / deftr, ranks), 6 = defenses capped like attacks, 7 = week resets Monday 17:00 UTC (9:00 PST, same as the crawler); attack/defense counts come from the league group (gw), battle logs only add detail; 8 = analyze town halls through TH19, 9 = offense / defense trophies completed from the league trophy total when the battle log is partial; 10 = equipment id 61 is named Portal Pendant instead of "#61"
 const MIN_TH = 7, MAX_TH = 19;
 const MIN_ATK = 10, MIN_DEF = 10;          // attacks / defenses needed to be "qualified" for attack / defense ranks
 const DEFAULT_MAX_ATK = 30;
@@ -121,6 +121,9 @@ function loadSite(srcDir) {
   const stub = () => new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : stub()), apply: () => stub(), construct: () => stub(), set: () => true });
   const ctx = vm.createContext({ console, document: stub(), window: stub(), navigator: stub(), location: stub(), localStorage: stub(), sessionStorage: stub(), innerWidth: 1000, setTimeout, clearTimeout, URL });
   for (const f of files) vm.runInContext(fs.readFileSync(f, 'utf8'), ctx, { filename: f, timeout: 10000 });
+  // The site's armyids.js has no entry for equipment id 61 yet (Minion Prince's Portal Pendant), so it would be named "#61". Fill the gap
+  // here; once the site adds the id this does nothing.
+  vm.runInContext("(function () { const eq = ARMY_IDS && ARMY_IDS.equip; if (eq && !eq[61]) eq[61] = ['Portal Pendant', 'equipment/portal_pendant.webp']; })();", ctx);
   const api = vm.runInContext('({ canonCode, infoOf, tallyArmyStats, noteStratPlayer, ARMY_IDS, topCode, OPENER_PARTS, partIcon })', ctx);
   const hash = sha1(files.map(f => fs.readFileSync(f)).reduce((x, y) => Buffer.concat([x, y]), Buffer.alloc(0)));
   return { ...api, files: files.map(f => path.relative(srcDir, f)), hash };

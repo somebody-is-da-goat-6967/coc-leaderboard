@@ -91,6 +91,9 @@ function makeContext(files, th19 = false) {
   const stub = { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], createElement: () => ({ setAttribute() {}, append() {}, classList: { add() {}, remove() {}, toggle() {} } }), addEventListener() {}, body: { append() {} }, head: { append() {} } };
   const context = vm.createContext({ window: { TH19_MODE: th19 }, document: stub, location: { protocol: 'https:', search: '' }, navigator: {}, setTimeout, clearTimeout, requestAnimationFrame: (f) => setTimeout(f, 0), console });
   for (const file of files) vm.runInContext(fs.readFileSync(path.join(siteDir, file), 'utf8'), context, { filename: file, timeout: 120000 });
+  // The site's armyids.js (synced from the live site) has no entry for equipment id 61 yet (Minion Prince's Portal Pendant), so decoded
+  // armies would name it "#61". Fill the gap here; once the live site adds the id this does nothing.
+  vm.runInContext("(function () { const eq = ARMY_IDS && ARMY_IDS.equip; if (eq && !eq[61]) eq[61] = ['Portal Pendant', 'equipment/portal_pendant.webp']; })();", context);
   return context;
 }
 async function call(context, expression, input) {
