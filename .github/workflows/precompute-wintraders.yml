@@ -33,5 +33,7 @@ jobs:
             echo "No new archived Legend I data."
             exit 0
           fi
-          git commit -m "Legend I wintrader reports $(date -u +%Y-%m-%d)"
-          git push origin HEAD:computed-season
+          git checkout --orphan fresh
+          git add -A
+          git commit -q -m "Legend I wintrader reports $(date -u +%Y-%m-%d)"
+          git push -f origin fresh:computed-season
