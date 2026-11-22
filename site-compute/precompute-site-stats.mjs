@@ -106,9 +106,33 @@ function sameSeason(dateA, dateB, anchor, seasonDays) {
   return dateA && dateB && idx(dateA) === idx(dateB);
 }
 
+// One strategy name per army share code ("<opener> + <army>", the name /wararmies uses; many balloons = LaLo / Drag LaLo).
+// Shared by the daily summaries (popular armies over time) and the top-performer boards, so both always use the same names.
+function installStrategyLabeler(context) {
+  vm.runInContext(`globalThis.__strategyLabel = (function() {
+    const labels = new Map();
+    return function(code) {
+      let hit = labels.get(code); if (hit) return hit;
+      const inf = infoOf(code), cls = inf.cls || {}, counts = new Map();
+      for (const [id, n] of armyCounts(secOf(code, /u([\\dx-]*)/))) {
+        if (isSiegeId(id)) continue;
+        const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
+      }
+      const balloons = (counts.get('Balloon') || 0) + (counts.get('Rocket Balloon') || 0), dragons = counts.get('Dragon') || 0;
+      let label = (cls.strategy || 'Unknown Build').replace(/Rocket Balloons?/g, 'LaLo');
+      if (balloons >= ${LALO_MIN_BALLOONS}) {
+        const core = dragons >= ${DRAG_LALO_MIN_DRAGONS} ? 'Drag LaLo' : 'LaLo', opener = cls.openerRaw || 'Spam Opener';
+        label = opener === 'Spam' ? 'Totem Spam + ' + core : opener === 'Spam Opener' ? core : cls.opener + ' + ' + core;
+      }
+      if (labels.size > 400000) labels.clear();
+      labels.set(code, label); return label;
+    };
+  })();`, context);
+}
+
 function installArmyDaySummarizer(context) {
   vm.runInContext(`globalThis.__summarizeArmyDay = function(date, players) {
-    const armies = {}, openers = {}, equipment = {}, byCode = new Map(); let codedAttacks = 0;
+    const armies = {}, openers = {}, strategies = {}, equipment = {}, byCode = new Map(); let codedAttacks = 0;
     const add = (map, key, code, triple) => {
       const x = map[key] || (map[key] = { uses: 0, triples: 0, variants: {} });
       x.uses++; if (triple) x.triples++;
@@ -119,12 +143,13 @@ function installArmyDaySummarizer(context) {
       const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++;
       add(armies, info.group, code, triple);
       add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', code, triple);
+      add(strategies, __strategyLabel(code), code, triple);
       const t = byCode.get(code) || (byCode.set(code, [0, 0]), byCode.get(code)); t[0]++; if (triple) t[1]++;
     }
     // Keep only the most used share codes per army family / opener and day: the season only needs a representative code, and storing every code of every day was the biggest thing held in memory.
-    for (const map of [armies, openers]) for (const x of Object.values(map)) {
+    for (const [map, keep] of [[armies, 25], [openers, 25], [strategies, 5]]) for (const x of Object.values(map)) {
       const entries = Object.entries(x.variants);
-      if (entries.length > 25) x.variants = Object.fromEntries(entries.sort((a, b) => b[1] - a[1]).slice(0, 25));
+      if (entries.length > keep) x.variants = Object.fromEntries(entries.sort((a, b) => b[1] - a[1]).slice(0, keep));
     }
     // Equipment is resolved once per distinct army code of the day (not once per attack), then weighted by how often the code was used.
     for (const [code, t] of byCode) {
@@ -137,7 +162,7 @@ function installArmyDaySummarizer(context) {
         e.uses += t[0]; e.triples += t[1];
       }
     }
-    return { date: String(date).slice(0, 10), codedAttacks, armies, openers, equipment };
+    return { date: String(date).slice(0, 10), codedAttacks, armies, openers, strategies, equipment };
   };`, context);
 }
 
@@ -153,24 +178,7 @@ function installArmyPerformers(context) {
     const nt = (t) => String(t || '').replace(/^#/, '').toUpperCase();
     const season = new Map((eligible || []).map((e) => [nt(e[0]), e]));
     const useSeason = season.size > 0 && Object.keys(agg.players || {}).some((t) => season.has(nt(t)));
-    const labels = new Map();
-    const labelOf = (code) => {
-      let hit = labels.get(code); if (hit) return hit;
-      const inf = infoOf(code), cls = inf.cls || {}, counts = new Map();
-      for (const [id, n] of armyCounts(secOf(code, /u([\\dx-]*)/))) {
-        if (isSiegeId(id)) continue;
-        const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
-      }
-      // Many balloons (plain or Rocket) = LaLo; the name "Rocket Balloons" is never shown.
-      const balloons = (counts.get('Balloon') || 0) + (counts.get('Rocket Balloon') || 0), dragons = counts.get('Dragon') || 0;
-      let label = (cls.strategy || 'Unknown Build').replace(/Rocket Balloons?/g, 'LaLo');
-      if (balloons >= laloBalloons) {
-        const core = dragons >= dragLaloDragons ? 'Drag LaLo' : 'LaLo', opener = cls.openerRaw || 'Spam Opener';
-        label = opener === 'Spam' ? 'Totem Spam + ' + core : opener === 'Spam Opener' ? core : cls.opener + ' + ' + core;
-      }
-      if (labels.size > 400000) labels.clear();
-      labels.set(code, label); return label;
-    };
+    const labelOf = (code) => __strategyLabel(code);
     // Minion Prince's Portal Pendant (hero 6, equipment id 61 in the share codes; the id is not in armyids.js yet).
     const PORTAL_PENDANT_ID = 61;
     const hasPortal = (code) => {
@@ -430,6 +438,43 @@ function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
   return { dates, codedAttacks, codedAttackTotal: codedTotal, armies: armyRows, openers: openerRows };
 }
 
+// Most popular armies (full strategy = opener + army) per Legend Day (feeds /legendstats "Popular armies").
+// Besides the season's most used armies this keeps the armies that are popular RIGHT NOW and the ones that grew the most, so an army that only
+// took off mid season (e.g. a new Backpack Arrow LaLo) is on the list even though its season total is still small.
+const POPULAR_SKIP = new Set(['Farming Army', 'Unknown Build', 'Unknown']);
+const POPULAR_TOP_SEASON = 20, POPULAR_TOP_RECENT = 15, POPULAR_TOP_RISING = 15, POPULAR_RECENT_DAYS = 7, POPULAR_EMERGED_PCT = 1;
+function precomputeStrategyTrend(dayRows) {
+  const dates = dayRows.map((d) => d.date), coded = dayRows.map((d) => d.codedAttacks || 0), total = coded.reduce((a, b) => a + b, 0), n = dates.length, map = new Map();
+  dayRows.forEach((day, di) => {
+    for (const [label, v] of Object.entries(day.strategies || {})) {
+      if (POPULAR_SKIP.has(label)) continue;
+      let x = map.get(label); if (!x) map.set(label, (x = { label, uses: 0, triples: 0, variants: new Map(), daily: Array.from({ length: n }, () => ({ uses: 0, triples: 0 })) }));
+      x.uses += v.uses || 0; x.triples += v.triples || 0; x.daily[di].uses += v.uses || 0; x.daily[di].triples += v.triples || 0;
+      for (const [code, c] of Object.entries(v.variants || {})) x.variants.set(code, (x.variants.get(code) || 0) + c);
+    }
+  });
+  const pct = (a, b) => (b ? +(100 * a / b).toFixed(2) : 0);
+  const k = Math.min(POPULAR_RECENT_DAYS, n), recentFrom = n - k, sum = (arr, from, to) => arr.slice(from, to).reduce((a, b) => a + b, 0);
+  const rows = [...map.values()].map((x) => {
+    const daily = x.daily.map((v, i) => ({ uses: v.uses, usageRate: pct(v.uses, coded[i]), triples: v.triples, tripleRate: v.uses ? pct(v.triples, v.uses) : null }));
+    const recentRate = pct(sum(x.daily.map((v) => v.uses), recentFrom, n), sum(coded, recentFrom, n));
+    const beforeRate = recentFrom > 0 ? pct(sum(x.daily.map((v) => v.uses), 0, recentFrom), sum(coded, 0, recentFrom)) : null;
+    let peak = -1; daily.forEach((v, i) => { if (coded[i] > 0 && (peak < 0 || v.usageRate > daily[peak].usageRate)) peak = i; });
+    const since = daily.findIndex((v) => v.usageRate >= POPULAR_EMERGED_PCT);
+    return {
+      label: x.label, code: [...x.variants].sort((a, b) => b[1] - a[1])[0]?.[0] || '', uses: x.uses, usageRate: pct(x.uses, total), triples: x.triples, tripleRate: x.uses ? pct(x.triples, x.uses) : null,
+      recentRate, beforeRate, gain: beforeRate == null ? null : +(recentRate - beforeRate).toFixed(2),
+      peakRate: peak >= 0 ? daily[peak].usageRate : 0, peakDate: peak >= 0 ? dates[peak] : null, popularSince: since >= 0 ? dates[since] : null, daily,
+    };
+  }).filter((r) => r.code);
+  const pick = new Set();
+  const take = (list, count) => list.slice(0, count).forEach((r) => pick.add(r));
+  take([...rows].sort((a, b) => b.uses - a.uses), POPULAR_TOP_SEASON);
+  take([...rows].sort((a, b) => b.recentRate - a.recentRate), POPULAR_TOP_RECENT);
+  take([...rows].filter((r) => r.gain != null && r.gain > 0).sort((a, b) => b.gain - a.gain), POPULAR_TOP_RISING);
+  return { schema: 1, dates, codedAttacks: coded, codedAttackTotal: total, recentDays: k, strategies: [...pick].sort((a, b) => b.uses - a.uses) };
+}
+
 // Hero equipment usage per Legend Day (feeds /legendstats "Equipment usage"). An attack counts once for every distinct piece it carried,
 // so the usage rates (share of attacks with a known army) add up to more than 100%.
 // The top EQUIPMENT_PER_HERO pieces of every hero are kept (the bot draws one block per hero), instead of one overall top list.
@@ -685,6 +730,7 @@ async function season() {
     if (!raw) { console.log(`[precompute:season] missing season ${key}`); continue; }
     // A fresh VM per season: the army decoder caches every share code it sees, and two seasons in one VM exhausted the heap.
     const context = makeContext(['armyids.js', 'army.js', 'legend.js', 'season.js']);
+    installStrategyLabeler(context);
     installArmyDaySummarizer(context);
     installArmyPerformers(context);
     const S = await call(context, 'computeSeason(__input.agg, () => {}, () => false)', { agg: raw });
@@ -705,6 +751,7 @@ async function season() {
     if (!dayRows.length) throw new Error(`No saved battlelog days found for season ${key}.`);
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
     const equipmentTrend = precomputeEquipmentTrend(dayRows);
+    const popularArmies = precomputeStrategyTrend(dayRows);
     const tripleDaily = buildTripleDaily(dayRows.map((d) => d.date), tripleDays);
     const rankLadder = computeRankLadder(raw);
     const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
@@ -720,6 +767,7 @@ async function season() {
       leaderboards: seasonLeaderboards(S),
       armyTrend: S.armyTrend,
       equipmentTrend,
+      popularArmies,
       armyPerformers,
       tripleDaily,
       rankLadder,
