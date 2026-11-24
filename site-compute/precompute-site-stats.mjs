@@ -122,7 +122,11 @@ function installStrategyLabeler(context) {
         const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
       }
       const balloons = (counts.get('Balloon') || 0) + (counts.get('Rocket Balloon') || 0), dragons = counts.get('Dragon') || 0;
-      let label = (cls.strategy || 'Unknown Build').replace(/Rocket Balloons?/g, 'LaLo');
+      // FUTURE REFERENCE: the Fireball + Super Minions + Rocket Balloons army (Norman) is NOT a LaLo. It only brings about 7-9 Rocket Balloons
+      // (plus a few normal ones) with Super Minions, so its name must stay as wararmies gives it instead of being turned into LaLo by the
+      // text replace below. Real LaLo armies are caught by the balloon-count rule after it. Keep in sync with tidyLabel in the bot's legendstats.js.
+      const rawStrategy = cls.strategy || 'Unknown Build';
+      let label = (rawStrategy.includes('Super Minion') && rawStrategy.includes('Rocket Balloons')) ? rawStrategy : rawStrategy.replace(/Rocket Balloons?/g, 'LaLo');
       if (balloons >= ${LALO_MIN_BALLOONS}) {
         const core = dragons >= ${DRAG_LALO_MIN_DRAGONS} ? 'Drag LaLo' : 'LaLo', opener = cls.openerRaw || 'Spam Opener';
         label = opener === 'Spam' ? 'Totem Spam + ' + core : opener === 'Spam Opener' ? core : cls.opener + ' + ' + core;
