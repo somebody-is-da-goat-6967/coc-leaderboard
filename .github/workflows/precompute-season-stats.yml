@@ -31,6 +31,8 @@ jobs:
         run: |
           URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git clone --depth 1 --branch computed-season "$URL" out || { mkdir out; git -C out init -q -b computed-season; git -C out remote add origin "$URL"; }
+      - name: Apply squad fix (squads count as their real troops)
+        run: node scripts/apply-squad-fix.mjs site-compute
       - name: Compute season stats
         run: node site-compute/precompute-site-stats.mjs --mode season --data data --site site-compute --out out
       - name: Publish computed results (single commit so history never grows)
