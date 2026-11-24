@@ -33,6 +33,8 @@ jobs:
         run: |
           URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git clone --depth 1 --branch computed-daily "$URL" out || { mkdir out; git -C out init -q -b computed-daily; git -C out remote add origin "$URL"; }
+      - name: Apply squad fix (squads count as their real troops)
+        run: node scripts/apply-squad-fix.mjs site-source
       - name: Compute daily stats
         run: node site-compute/precompute-site-stats.mjs --mode daily --data data --site site-source --out out
       - name: Publish computed results (single commit so history never grows)
