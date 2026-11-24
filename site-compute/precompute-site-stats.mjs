@@ -117,7 +117,7 @@ function installStrategyLabeler(context) {
     return function(code) {
       let hit = labels.get(code); if (hit) return hit;
       const inf = infoOf(code), cls = inf.cls || {}, counts = new Map();
-      for (const [id, n] of armyCounts(secOf(code, /u([\\dx-]*)/))) {
+      for (const [id, n] of (typeof expandSquads === 'function' ? expandSquads : (x) => x)(armyCounts(secOf(code, /u([\\dx-]*)/)))) {
         if (isSiegeId(id)) continue;
         const name = (ARMY_IDS.troop[id] || [])[0]; if (name) counts.set(name, (counts.get(name) || 0) + n);
       }
