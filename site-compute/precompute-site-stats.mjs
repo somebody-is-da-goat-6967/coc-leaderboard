@@ -138,8 +138,17 @@ function installStrategyLabeler(context) {
 }
 
 function installArmyDaySummarizer(context) {
-  vm.runInContext(`globalThis.__summarizeArmyDay = function(date, players) {
-    const armies = {}, openers = {}, strategies = {}, equipment = {}, byCode = new Map(); let codedAttacks = 0;
+  vm.runInContext(`globalThis.__squadCache = new Map(); globalThis.__summarizeArmyDay = function(date, players) {
+    const armies = {}, openers = {}, strategies = {}, equipment = {}, byCode = new Map(); let codedAttacks = 0, codedTriples = 0;
+    const squads = {}, squadAny = { uses: 0, triples: 0 }, squadCache = __squadCache;
+    const squadsOf = (code) => {
+      let hit = squadCache.get(code); if (hit) return hit;
+      const found = new Set(), raw = armyCounts(secOf(code, /u([\\dx-]*)/));
+      for (const e of (raw instanceof Map ? raw.entries() : Array.isArray(raw) ? raw : Object.entries(raw || {}))) {
+        const id = Number(Array.isArray(e) ? e[0] : e && e.id); if (id >= 195 && id <= 206) found.add(id);
+      }
+      hit = [...found]; if (squadCache.size > 400000) squadCache.clear(); squadCache.set(code, hit); return hit;
+    };
     const add = (map, key, code, triple) => {
       const x = map[key] || (map[key] = { uses: 0, triples: 0, variants: {} });
       x.uses++; if (triple) x.triples++;
@@ -147,7 +156,10 @@ function installArmyDaySummarizer(context) {
     };
     for (const player of Object.values(players || {})) for (const hit of player.attacks || []) {
       const code = hit.armyShareCode; if (!code) continue;
-      const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++;
+      const info = infoOf(code), triple = Number(hit.stars) === 3; codedAttacks++; if (triple) codedTriples++;
+      const sq = squadsOf(code);
+      if (sq.length) { squadAny.uses++; if (triple) squadAny.triples++; }
+      for (const id of sq) { const q = squads[id] || (squads[id] = { uses: 0, triples: 0 }); q.uses++; if (triple) q.triples++; }
       add(armies, info.group, code, triple);
       add(openers, info.cls.openerRaw || info.cls.opener || 'Unknown Opener', code, triple);
       add(strategies, __strategyLabel(code), code, triple);
@@ -169,7 +181,7 @@ function installArmyDaySummarizer(context) {
         e.uses += t[0]; e.triples += t[1];
       }
     }
-    return { date: String(date).slice(0, 10), codedAttacks, armies, openers, strategies, equipment };
+    return { date: String(date).slice(0, 10), codedAttacks, codedTriples, squads, squadAny, armies, openers, strategies, equipment };
   };`, context);
 }
 
@@ -272,7 +284,7 @@ function buildTripleDaily(dates, perDay) {
 }
 
 // Display name of an army family key ('family:super bowlers' -> 'Super Bowlers'). Openers never take part in a family.
-const FAMILY_NAMES = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'LaLo', lalo: 'LaLo' }; // a balloon-heavy army is called LaLo, never "Rocket Balloons"
+const FAMILY_NAMES = { throwers: 'Throwers', 'super bowlers': 'Super Bowlers', 'super witches': 'Super Witches', 'super yetis': 'Super Yetis', 'super dragons': 'Super Dragons', 'root riders': 'Root Riders', 'dragon riders': 'Dragon Riders', 'meteor golems': 'Meteor Golems', 'rocket balloons': 'LaLo', 'balloon smash': 'LaLo', lalo: 'LaLo' }; // a balloon-heavy army is called LaLo, never "Rocket Balloons"
 function familyLabel(key) {
   const family = String(key).replace(/^family:/, '');
   return FAMILY_NAMES[family] || family.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -410,6 +422,26 @@ function computeArmyBands(agg, infoOf) {
       };
     }),
   };
+}
+
+// ───── Squads: usage and triple rate per Legend Day (feeds /legendstats "Squads · usage & triple rate") ─────
+// Squads (TH8-19 update) are share-code troop slots with ids 195-206. An attack counts once for every different squad in its army, so the
+// squad shares can add up to more than "any squad". Shape read by the bot's squadRows():
+// { dates, codedAttacks, squads: [{ id, name, attacks[], triples[] }], any: { attacks[], triples[] }, none: { attacks[], triples[] } }
+const SQUAD_NAMES = { 195: 'Barch Squad', 196: 'Giant Wizard Squad', 197: 'Wall Breaker Squad', 198: 'Minion Squad', 199: 'Balloon Squad', 200: 'Golem Witch Squad',
+  201: 'Hog Rider Squad', 202: 'Miner Squad', 203: 'Healer Squad', 204: 'P.E.K.K.A Titan Squad', 205: 'Dragons Squad', 206: 'Baby Dragon Squad' };
+function precomputeSquadTrend(dayRows) {
+  const n = dayRows.length, zeros = () => new Array(n).fill(0), squads = new Map();
+  const any = { attacks: zeros(), triples: zeros() }, none = { attacks: zeros(), triples: zeros() };
+  dayRows.forEach((d, i) => {
+    for (const [id, v] of Object.entries(d.squads || {})) {
+      let s = squads.get(id); if (!s) squads.set(id, (s = { id: Number(id), name: SQUAD_NAMES[id] || `Squad #${id}`, attacks: zeros(), triples: zeros() }));
+      s.attacks[i] = v.uses || 0; s.triples[i] = v.triples || 0;
+    }
+    any.attacks[i] = d.squadAny?.uses || 0; any.triples[i] = d.squadAny?.triples || 0;
+    none.attacks[i] = Math.max(0, (d.codedAttacks || 0) - any.attacks[i]); none.triples[i] = Math.max(0, (d.codedTriples || 0) - any.triples[i]);
+  });
+  return { dates: dayRows.map((d) => d.date), codedAttacks: dayRows.map((d) => d.codedAttacks || 0), squads: [...squads.values()].sort((a, b) => b.attacks.reduce((x, y) => x + y, 0) - a.attacks.reduce((x, y) => x + y, 0)), any, none };
 }
 
 function precomputeArmyTrend(dayRows, { infoOf, OPENER_PARTS }) {
@@ -763,6 +795,8 @@ async function season() {
     S.armyTrend = precomputeArmyTrend(dayRows, vm.runInContext('({ infoOf, OPENER_PARTS })', context));
     const equipmentTrend = precomputeEquipmentTrend(dayRows);
     const popularArmies = precomputeStrategyTrend(dayRows);
+    const squadTrend = precomputeSquadTrend(dayRows);
+    console.log(`[precompute:season] ${key}: squads in ${squadTrend.any.attacks.reduce((a, b) => a + b, 0)} of ${dayRows.reduce((a, d) => a + (d.codedAttacks || 0), 0)} coded attacks, ${squadTrend.squads.length} different squads`);
     const tripleDaily = buildTripleDaily(dayRows.map((d) => d.date), tripleDays);
     const rankLadder = computeRankLadder(raw);
     const armyBands = computeArmyBands(raw, vm.runInContext('infoOf', context));
@@ -780,6 +814,7 @@ async function season() {
       armyTrend: S.armyTrend,
       equipmentTrend,
       popularArmies,
+      squadTrend,
       armyPerformers,
       tripleDaily,
       rankLadder,
