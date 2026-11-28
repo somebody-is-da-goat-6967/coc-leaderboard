@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-20",
+ "players": 11558,
+ "attacks": 89519,
+ "defenses": 89208,
+ "perfectDays": 18,
+ "zeroStarDefenses": 324,
+ "tripleRate": 0.30444933477809183,
+ "shielded": 2774,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+138",
+   "name": "Soquai",
+   "tag": "8RVRJJ0J",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:05",
+   "name": "Nightmares",
+   "tag": "Y9VGVCLJ",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−132",
+   "name": "[G]IET-[T]HUE",
+   "tag": "9YPRLJJCU",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "太极☯️Winter",
+   "tag": "GP8Y0YVUJ",
+   "tied": 1
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 12,371",
+   "name": "G⭐️O⭐️R⭐️S⭐️T",
+   "tag": "G8P0J8CUC",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+6,668",
+   "name": "marinaul war",
+   "tag": "8GGCQPYP",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+21",
+   "name": "第一个⚡ABO JAMAL前景",
+   "tag": "28LPUUPCU",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "04:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + LaLo Precision Dive",
+  "players": 615,
+  "attacks": 4610,
+  "tripleRate": 0.4260303687635575,
+  "avgStars": 2.3065075921908895,
+  "code": "h1p9e48_17-2m1p16e4_5-6p17e35_43-7p4e59_53i1x8-1x76d4x11u1x76-3x63-4x10-3x1-16x199-1x188s3x5-1x9-3x10-1x70-2x120"
+ },
+ "mostUsed": {
+  "name": "Queen Charge + Super Bowler Smash",
+  "players": 4473,
+  "share": 0.39573564540387507
+ }
+}

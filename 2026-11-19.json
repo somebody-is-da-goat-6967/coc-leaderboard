@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-18",
+ "players": 11286,
+ "attacks": 88548,
+ "defenses": 88125,
+ "perfectDays": 88,
+ "zeroStarDefenses": 285,
+ "tripleRate": 0.32444549848669646,
+ "shielded": 3166,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+153",
+   "name": "YT-broncocoby25",
+   "tag": "9CRYJJJJ9",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "0:24",
+   "name": "AMANY",
+   "tag": "PR9QCQYPP",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−126",
+   "name": "Kryster‼️777",
+   "tag": "P8CP2R0J",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "[ᴋᴋ]✨ᴷᴵᴺᴳ⚡ᴍᴄʟ",
+   "tag": "2GGY9LV9G",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 10,568",
+   "name": "(DALTON) 1h",
+   "tag": "CCVYYQJ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,999",
+   "name": "AX InvincibleLG",
+   "tag": "G0J8L000",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+86",
+   "name": "輝 Scorp",
+   "tag": "L0Y8GLVQP",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "04:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Warden Fireball Opener + LaLo Precision Dive",
+  "players": 272,
+  "attacks": 1998,
+  "tripleRate": 0.41041041041041043,
+  "avgStars": 2.28978978978979,
+  "code": "h2m1p16e22_5-4p4e6_13-6p17e49_61-7p2e59_56i2x17d2x70u2x76-1x23-1x5-2x10-1x0-3x1-1x2-8x199-5x206-1x188s2x5-1x9-2x10-4x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Super Bowler Smash",
+  "players": 3929,
+  "share": 0.3520924814051438
+ }
+}

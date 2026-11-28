@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-25",
+ "players": 11817,
+ "attacks": 92890,
+ "defenses": 92911,
+ "perfectDays": 21,
+ "zeroStarDefenses": 269,
+ "tripleRate": 0.26654107008289374,
+ "shielded": 3050,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+137",
+   "name": "Daddy’s Son",
+   "tag": "PPCL2GYQ",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:02",
+   "name": "ㄥayanami rei ㄟ",
+   "tag": "YY9899QGQ",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−136",
+   "name": "☆urKaisar☆",
+   "tag": "LY0RJRQ9C",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "3×0★",
+   "name": "AC DANNY",
+   "tag": "98P0LCLQ0",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 6,175",
+   "name": "하울",
+   "tag": "L8QLLLGR2",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+4,765",
+   "name": "INT Sʟᴀʏᴇʀ",
+   "tag": "8VQJCRV0P",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+14",
+   "name": "❄️Wolo❄️无可比拟",
+   "tag": "Y00G8PLUL",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "04:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + LaLo Precision Dive",
+  "players": 1857,
+  "attacks": 14172,
+  "tripleRate": 0.38646627152130963,
+  "avgStars": 2.273849844764324,
+  "code": "h1p9e48_17-2m1p16e4_5-6p17e35_43-7p4e59_53i1x8-1x76d4x11u1x76-3x63-4x10-3x1-16x199-1x188s3x5-1x9-3x10-1x70-2x120"
+ },
+ "mostUsed": {
+  "name": "Super Bowler Smash",
+  "players": 4751,
+  "share": 0.4062072503419973
+ }
+}

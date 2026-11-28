@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-01",
+ "players": 11459,
+ "attacks": 87409,
+ "defenses": 87439,
+ "perfectDays": 106,
+ "zeroStarDefenses": 303,
+ "tripleRate": 0.432026450365523,
+ "shielded": 2369,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+125",
+   "name": "luanvsj",
+   "tag": "88JU89CCQ",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:10",
+   "name": "Mustafa",
+   "tag": "P0JVJ28G9",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−126",
+   "name": "• BataQ •",
+   "tag": "PJC22UJ8P",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "t4k1",
+   "tag": "22QYVL0Q8",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 3,797",
+   "name": "LUKE SKYWALKER",
+   "tag": "LC02PVVPR",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,061",
+   "name": "⚡YT- Daksh RoR⚡",
+   "tag": "PLRUP92L8",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "[NE] DAN❤️MIA",
+   "tag": "RGYLY8CQ",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Duke Charge (Fox) + Dragon Riders",
+  "players": 197,
+  "attacks": 1481,
+  "tripleRate": 0.5185685347738015,
+  "avgStars": 2.451046590141796,
+  "code": "h2m1p16e4_34-4p4e6_13-6p17e43_35-7p10e52_59i1x188-1x5-2x65d1x70-1x98u1x17-8x65-3x63-1x23-7x57-1x6-1x10-1x0-4x1s2x5-1x9-6x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2399,
+  "share": 0.21612612612612614
+ }
+}

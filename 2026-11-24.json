@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-23",
+ "players": 11493,
+ "attacks": 89001,
+ "defenses": 89020,
+ "perfectDays": 15,
+ "zeroStarDefenses": 241,
+ "tripleRate": 0.27483960854372425,
+ "shielded": 2782,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+137",
+   "name": "D.Z✨Sunmi",
+   "tag": "GUGUPQLVQ",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:04",
+   "name": "布朗",
+   "tag": "QVGC0CR2U",
+   "tied": 1
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−132",
+   "name": "Token",
+   "tag": "Q8UU8RU2",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "BIaHk",
+   "tag": "GPVL290JQ",
+   "tied": 4
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 10,246",
+   "name": "Dalph",
+   "tag": "G9G9GQPCQ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+778",
+   "name": "GUTSㅤ♕",
+   "tag": "P9GULLRV9",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+108",
+   "name": "ITS! SAN",
+   "tag": "PCVUUL8RQ",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "02:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + Balloon Squad Smash",
+  "players": 51,
+  "attacks": 361,
+  "tripleRate": 0.44598337950138506,
+  "avgStars": 2.299168975069252,
+  "code": "h1p9e48_17-2m1p16e4_5-6p17e49_43-7p4e60_53i1x5-1x63-1x76d2x5-1x70u22x199-1x188s1x9-3x10-4x11-3x120"
+ },
+ "mostUsed": {
+  "name": "Super Bowler Smash",
+  "players": 4649,
+  "share": 0.4070571753786884
+ }
+}

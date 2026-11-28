@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-22",
+ "players": 11624,
+ "attacks": 88926,
+ "defenses": 88782,
+ "perfectDays": 12,
+ "zeroStarDefenses": 294,
+ "tripleRate": 0.27306974338213796,
+ "shielded": 2708,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+126",
+   "name": "Hoffles1",
+   "tag": "QV22JRPU",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:04",
+   "name": "Inferno Dragon",
+   "tag": "9LRCG9Q9J",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−131",
+   "name": "Dosk1N",
+   "tag": "Y2Y2JRC20",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "golden duck",
+   "tag": "YRC2LYQCQ",
+   "tied": 3
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 11,479",
+   "name": "Jason 소소",
+   "tag": "RVP9CJ0R",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+806",
+   "name": "RS_Preetish✨✨",
+   "tag": "Y0C22V9V8",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+2",
+   "name": "Leo",
+   "tag": "9L0UL8GVU",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "02:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + Inferno Dragon Smash",
+  "players": 53,
+  "attacks": 390,
+  "tripleRate": 0.5025641025641026,
+  "avgStars": 2.394871794871795,
+  "code": "h1p9e48_17-2m1p16e4_5-6p17e35_43-7p4e53_60i1x188-1x5-1x63-1x76d1x10-3x11u3x63-1x10-1x1-19x199s3x5-1x9-3x10-1x70-2x120"
+ },
+ "mostUsed": {
+  "name": "Super Bowler Smash",
+  "players": 4483,
+  "share": 0.39799360795454547
+ }
+}

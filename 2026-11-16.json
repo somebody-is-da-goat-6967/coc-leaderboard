@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-15",
+ "players": 11561,
+ "attacks": 87998,
+ "defenses": 88012,
+ "perfectDays": 120,
+ "zeroStarDefenses": 307,
+ "tripleRate": 0.4412259369531126,
+ "shielded": 2541,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+119",
+   "name": "WARNING 4⚡️U",
+   "tag": "88R9Y0UUR",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:04",
+   "name": "WN⭐️StarPlayer",
+   "tag": "9CGGCQ29C",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−149",
+   "name": "yhkwc19",
+   "tag": "9UUP988Y",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Jason too",
+   "tag": "GYL0C0RCL",
+   "tied": 0
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 12,055",
+   "name": "「ᴘʀᴀɴᴛ」◉ ᴍᴀɴᴀꜰ√",
+   "tag": "2909VGUQV",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,499",
+   "name": "Max❤️Rula",
+   "tag": "2UGJV2J2Y",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+45",
+   "name": "3wA ⚡️ Bumt3b",
+   "tag": "2YLG00GP9",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "04:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + Throwers",
+  "players": 2556,
+  "attacks": 19755,
+  "tripleRate": 0.4986079473551,
+  "avgStars": 2.3929131865350546,
+  "code": "h0p9e14_32-1p3e17_20-2p16e24_5-7p4e52_53i1x135-1x5-2x58-1x64d1x53-1x98u9x132-1x58-5x7-2x109-1x150-2x28-1x82-1x3-2x5-2x26-2x4-2x1s1x5-1x9-3x10-1x35-1x70-3x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 3025,
+  "share": 0.27176354325756896
+ }
+}

@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-16",
+ "players": 10728,
+ "attacks": 81026,
+ "defenses": 81024,
+ "perfectDays": 278,
+ "zeroStarDefenses": 283,
+ "tripleRate": 0.5547725421469651,
+ "shielded": 2943,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+134",
+   "name": "հϵͥяͣᴏͫ ąokiji",
+   "tag": "QJ8CGUV88",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:05",
+   "name": "OM BARAI ⚔P.A⚔",
+   "tag": "8PGU02CJ9",
+   "tied": 1
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−161",
+   "name": "KH ⚔️ WARRHEAD",
+   "tag": "GGVVCLL2",
+   "tied": 1
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "松尾",
+   "tag": "2JQRLRVUP",
+   "tied": 4
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 12,306",
+   "name": "『E3』HoFo.",
+   "tag": "QPVPC2YJ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+2,045",
+   "name": "ATC☠️FADY",
+   "tag": "2UL0P9JRL",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "晚歸享晨霧",
+   "tag": "8CGJ2PGUG",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "03:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Warden Fireball Opener + LaLo Precision Dive",
+  "players": 234,
+  "attacks": 1724,
+  "tripleRate": 0.6722737819025522,
+  "avgStars": 2.605568445475638,
+  "code": "h2m1p16e5_22-4p4e6_13-6p17e61_49-7p2e56_59i1x5-1x63-1x76d2x70u2x76-3x63-1x23-1x12-40x5-3x10-1x0-2x1-1x188s2x5-1x9-2x10-1x11-3x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 2958,
+  "share": 0.2786885245901639
+ }
+}

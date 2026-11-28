@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-17",
+ "players": 10994,
+ "attacks": 86329,
+ "defenses": 86353,
+ "perfectDays": 27,
+ "zeroStarDefenses": 305,
+ "tripleRate": 0.35013726557703667,
+ "shielded": 3460,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+138",
+   "name": "FIRAT",
+   "tag": "R8U9Q2V8",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:02",
+   "name": "XxAmnésiaxX",
+   "tag": "GUC9RGUQ",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−115",
+   "name": "<-Yargıç->",
+   "tag": "LYVG90LJ2",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "ᴏᴍᴇɢᴀ",
+   "tag": "PRV2RY0R0",
+   "tied": 3
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 10,816",
+   "name": "ᴶᴿ Sin Merzosty",
+   "tag": "PVV0P2PPQ",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+1,908",
+   "name": "Nian",
+   "tag": "PGLLVRJRV",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "Aakash \"ultra\"",
+   "tag": "2UUR9GU99",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "02:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Warden Fireball Opener + LaLo Precision Dive",
+  "players": 229,
+  "attacks": 1699,
+  "tripleRate": 0.42672160094173045,
+  "avgStars": 2.331371394938199,
+  "code": "h2m1p16e5_22-4p4e6_13-6p17e61_49-7p2e56_59i1x5-1x63-1x76d2x70u2x76-3x63-1x23-1x12-40x5-3x10-1x0-2x1-1x188s2x5-1x9-2x10-1x11-3x35-2x120"
+ },
+ "mostUsed": {
+  "name": "Blower Backpack + Super Bowler Smash",
+  "players": 3458,
+  "share": 0.3175973548861131
+ }
+}

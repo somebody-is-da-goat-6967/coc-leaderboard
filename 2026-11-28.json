@@ -1,0 +1,78 @@
+{
+ "date": "2026-11-27",
+ "players": 11865,
+ "attacks": 91197,
+ "defenses": 91217,
+ "perfectDays": 16,
+ "zeroStarDefenses": 292,
+ "tripleRate": 0.26032654582935844,
+ "shielded": 3000,
+ "records": [
+  {
+   "label": "MOST NET GAIN",
+   "value": "+134",
+   "name": "BS⚡️JHONY⚡️^_^",
+   "tag": "LQL2QLVG9",
+   "tied": 0
+  },
+  {
+   "label": "FASTEST TRIPLE",
+   "value": "1:01",
+   "name": "Buu",
+   "tag": "2CG2JUVUG",
+   "tied": 0
+  },
+  {
+   "label": "BEST DEFENSE",
+   "value": "−113",
+   "name": "FAC DanielRX",
+   "tag": "8CQ8VL28",
+   "tied": 0
+  },
+  {
+   "label": "MOST 0★ DEFENSES",
+   "value": "2×0★",
+   "name": "Ramirez",
+   "tag": "GQ9Y20VCC",
+   "tied": 4
+  },
+  {
+   "label": "BIGGEST CLIMBER",
+   "value": "▲ 9,954",
+   "name": "SHUBHAM_GAMER",
+   "tag": "PLG2C2CYU",
+   "tied": 0
+  },
+  {
+   "label": "GIANT KILLER",
+   "value": "+914",
+   "name": "THE RIDOY",
+   "tag": "2R0LQGVQJ",
+   "tied": 0
+  },
+  {
+   "label": "LOWEST OFFENSE",
+   "value": "+0",
+   "name": "TYG♨️1-CHAI✯™",
+   "tag": "LLCQPJUUU",
+   "tied": 0
+  },
+  {
+   "label": "GOLDEN HOUR",
+   "value": "04:00 UTC"
+  }
+ ],
+ "army": {
+  "name": "Backpack Arrow Combo + LaLo Precision Dive",
+  "players": 1914,
+  "attacks": 14607,
+  "tripleRate": 0.3653043061545834,
+  "avgStars": 2.240364208940919,
+  "code": "h1p9e48_17-2m1p16e4_5-6p17e35_43-7p4e59_53i1x8-1x76d4x11u1x76-3x63-4x10-3x1-16x199-1x188s3x5-1x9-3x10-1x70-2x120"
+ },
+ "mostUsed": {
+  "name": "Super Bowler Smash",
+  "players": 4564,
+  "share": 0.39549393414211437
+ }
+}
