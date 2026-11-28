@@ -1,0 +1,43 @@
+{
+ "weekKey": "2026-11-23",
+ "start": "2026-11-23T17:00:00.000Z",
+ "end": "2026-11-29T05:00:00.000Z",
+ "updatedAt": "2026-11-28T20:44:16.473Z",
+ "mode": "trophies",
+ "tagsInSeed": 80901,
+ "crawledThisRun": 2920,
+ "failedThisRun": 0,
+ "logsDueAtStart": 2920,
+ "groupsDueAtStart": 34019,
+ "groupsNeverFetchedAtStart": 0,
+ "profilesDueAtStart": 12251,
+ "incompleteAtStart": 34,
+ "incompleteLeft": 34,
+ "apiErrors": {
+  "players:520": 1,
+  "players:525": 2,
+  "leaguegroup:525": 1,
+  "leaguegroup:520": 2
+ },
+ "apiErrorSamples": {
+  "players:520": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/\",\"title\":\"Error 520: Web server is returning an unknown error\",\"status\":520,\"detail\":\"The origin web server sent a response that Cloudflare could not parse. This may indicate the ori",
+  "players:525": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-525/\",\"title\":\"Error 525: SSL handshake failed\",\"status\":525,\"detail\":\"The SSL/TLS handshake between Cloudflare and the origin server failed. The origin's SSL configuration is not compati",
+  "leaguegroup:525": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-525/\",\"title\":\"Error 525: SSL handshake failed\",\"status\":525,\"detail\":\"The SSL/TLS handshake between Cloudflare and the origin server failed. The origin's SSL configuration is not compati",
+  "leaguegroup:520": "{\"type\":\"https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-520/\",\"title\":\"Error 520: Web server is returning an unknown error\",\"status\":520,\"detail\":\"The origin web server sent a response that Cloudflare could not parse. This may indicate the ori"
+ },
+ "gapsThisRun": 0,
+ "groupsThisRun": 10040,
+ "groupMembersUpdated": 13121,
+ "profilesThisRun": 3206,
+ "callsUsed": 16200,
+ "callBudget": 16200,
+ "playersTracked": 80987,
+ "playersWithBattles": 55061,
+ "playersWithLeague": 80945,
+ "playersWithGroupData": 42840,
+ "battles": 1564996,
+ "battleTypesSeen": {
+  "ranked": 47433,
+  "homevillage": 82725
+ }
+}
